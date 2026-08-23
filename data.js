@@ -4,6 +4,13 @@
 // 之後如果品項/口味/價格有調整，只需要改這個檔案即可。
 // ============================================================
 
+// 每次更新 assets/img 裡的照片，把這個數字 +1，
+// 網頁就會強迫瀏覽器重新抓最新的圖，不會一直卡舊的快取版本。
+const ASSET_VERSION = 2;
+function imgV(path) {
+  return path ? `${path}?v=${ASSET_VERSION}` : path;
+}
+
 const SHOP_INFO = {
   name: "巧家麵包店",
   phone: "06-259-5077",

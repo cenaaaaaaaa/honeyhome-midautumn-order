@@ -103,7 +103,7 @@ function renderPriceList() {
     wrap.insertAdjacentHTML(
       "beforeend",
       `<div class="price-card">
-        <img src="${p.img}" alt="${p.name}" onerror="this.style.display='none'">
+        <img src="${imgV(p.img)}" alt="${p.name}" onerror="this.style.display='none'">
         <div class="info">
           <span class="name">${p.name}</span>${p.subtitle ? `<span class="subtitle">（${p.subtitle}）</span>` : ""}
           <div class="flavors">口味：${p.flavors.join("、")}</div>
@@ -118,7 +118,7 @@ function renderPriceList() {
     wrap.insertAdjacentHTML(
       "beforeend",
       `<div class="price-card">
-        <img src="${b.img}" alt="${b.name}" onerror="this.style.display='none'">
+        <img src="${imgV(b.img)}" alt="${b.name}" onerror="this.style.display='none'">
         <div class="info">
           <span class="name">${b.name}</span>
           <div class="flavors">${b.size}／整盒固定內容</div>
@@ -138,7 +138,7 @@ function renderBoxGallery() {
     const el = document.createElement("div");
     el.className = "box-card";
     el.innerHTML = `
-      ${box.img ? `<img src="${box.img}" alt="${box.name}" onerror="this.style.display='none'">` : ""}
+      ${box.img ? `<img src="${imgV(box.img)}" alt="${box.name}" onerror="this.style.display='none'">` : ""}
       <div class="body">
         ${pending ? `<span class="pending-tag">詳情請洽詢</span>` : ""}
         <div class="name">${box.name}</div>
@@ -200,7 +200,7 @@ function renderComboBoxPicker() {
     const card = document.createElement("div");
     card.className = "box-select-card";
     card.innerHTML = `
-      ${box.img ? `<img src="${box.img}" alt="" style="width:100%;height:70px;object-fit:contain" onerror="this.style.display='none'">` : ""}
+      ${box.img ? `<img src="${imgV(box.img)}" alt="" style="width:100%;height:70px;object-fit:contain" onerror="this.style.display='none'">` : ""}
       <div class="name">${box.name}</div>
     `;
     card.addEventListener("click", () => startCombo(box.id));
