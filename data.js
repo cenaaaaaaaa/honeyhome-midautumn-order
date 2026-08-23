@@ -42,17 +42,14 @@ const PRODUCTS = {
     flavors: ["綠豆（素）", "蝦米肉燥（葷）", "綜合"],
     img: "assets/img/ludoupeng.png",
   },
-  // 小月餅目前訂購單上沒有標明價格與口味，先保留欄位、標示「詳情請洽詢」。
-  // 之後老闆補齊資料後，把 pending 改成 false 並填入 price / flavors 即可。
   xiaoyuebing: {
     key: "xiaoyuebing",
     name: "小月餅",
     subtitle: null,
-    price: null,
-    unit: "顆",
-    flavors: [],
-    pending: true,
-    img: null,
+    price: 45,
+    unit: "個",
+    flavors: ["蓮蓉", "香菇滷肉", "烏豆沙", "綠茶", "北海道牛奶"],
+    img: "assets/img/xiaoyuebing.png",
   },
 };
 
@@ -129,7 +126,6 @@ const MIX_BOXES = [
     type: "mixFree",
     productKeys: ["danhuangsu", "shuiguosu", "xiaoyuebing"],
     sizes: [12, 15, 20],
-    pending: true, // 小月餅資料未補齊前，這個選項先顯示「詳情請洽詢」
     img: "assets/img/mix-d.png",
   },
 ];
