@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>巧家麵包店｜中秋禮盒互動訂購</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<!-- ========== 首頁 ========== -->
+<section id="home" class="screen page">
+  <div class="brand-header">
+    <img class="brand-logo" src="assets/img/logo.png" alt="巧家麵包店 Honey Home" />
+    <div class="brand-name" id="brand-name">巧家麵包店</div>
+    <div class="brand-sub">2026 中秋節精緻禮盒</div>
+    <div class="brand-divider"></div>
+  </div>
+
+  <div class="big-nav">
+    <button id="btn-price" class="big-btn">
+      <span class="icon">💰</span>
+      <div>
+        <div class="label">今年單顆價格</div>
+        <div class="desc">看每一項單品和固定禮盒的價格</div>
+      </div>
+    </button>
+    <button id="btn-boxes" class="big-btn">
+      <span class="icon">🎁</span>
+      <div>
+        <div class="label">禮盒樣式選擇</div>
+        <div class="desc">看看今年有哪些禮盒規格和照片</div>
+      </div>
+    </button>
+    <button id="btn-combo" class="big-btn">
+      <span class="icon">🥮</span>
+      <div>
+        <div class="label">試著組合看看</div>
+        <div class="desc">自己挑口味、湊數量，組出理想禮盒</div>
+      </div>
+    </button>
+  </div>
+
+  <div class="contact-footer">
+    <div class="row">📞 <a id="footer-phone" href="tel:">--</a></div>
+    <div class="row">💬 <a id="footer-line" href="#" target="_blank" rel="noopener"><span id="footer-line-text">LINE</span></a></div>
+    <div class="note" id="footer-note"></div>
+  </div>
+</section>
+
+<!-- ========== 按鈕一：單顆價格 ========== -->
+<section id="screen-price" class="screen page hidden">
+  <div class="topbar">
+    <button class="back-btn" data-back>‹</button>
+    <h1>今年單顆價格</h1>
+  </div>
+  <div id="price-list"></div>
+</section>
+
+<!-- ========== 按鈕二：禮盒樣式選擇 ========== -->
+<section id="screen-boxes" class="screen page hidden">
+  <div class="topbar">
+    <button class="back-btn" data-back>‹</button>
+    <h1>禮盒樣式選擇</h1>
+  </div>
+  <div id="box-gallery"></div>
+</section>
+
+<section id="screen-fixed-contact" class="screen page hidden">
+  <div class="topbar">
+    <button class="back-btn" data-back>‹</button>
+    <h1>固定禮盒</h1>
+  </div>
+  <p>這款禮盒是整組固定內容，無法線上調整比例，歡迎直接來電或加 LINE 詢問訂購～</p>
+</section>
+
+<!-- ========== 按鈕三：自己組合看看（選禮盒） ========== -->
+<section id="screen-combo-pick" class="screen page hidden">
+  <div class="topbar">
+    <button class="back-btn" data-back>‹</button>
+    <h1>試著組合看看</h1>
+  </div>
+  <p style="color:var(--ink-soft);font-size:14px;">先選一款想組合的禮盒：</p>
+  <div id="combo-box-grid" class="box-select-grid"></div>
+</section>
+
+<!-- ========== 按鈕三：組合細節 ========== -->
+<section id="screen-combo-detail" class="screen page hidden">
+  <div class="topbar">
+    <button class="back-btn" data-back>‹</button>
+    <h1 id="combo-detail-title">組合禮盒</h1>
+  </div>
+  <div id="combo-detail-body"></div>
+
+  <div id="combo-summary" class="combo-summary">
+    <div id="combo-remain" class="remain"></div>
+    <div id="combo-total" class="total">總金額：$0</div>
+    <button id="combo-next-btn" class="solid-btn" disabled>下一步，填寫訂購資料</button>
+  </div>
+</section>
+
+<!-- ========== 訂單表單 ========== -->
+<section id="screen-order-form" class="screen page hidden">
+  <div class="topbar">
+    <button class="back-btn" data-back>‹</button>
+    <h1>填寫訂購資料</h1>
+  </div>
+
+  <div class="order-recap" id="order-recap"></div>
+
+  <form id="order-form">
+    <div class="field">
+      <label>姓名 *</label>
+      <input type="text" id="order-name" required />
+    </div>
+    <div class="field">
+      <label>電話 *</label>
+      <input type="tel" id="order-phone" required />
+    </div>
+    <div class="field">
+      <label>送貨日期</label>
+      <input type="date" id="order-date" />
+    </div>
+    <div class="field">
+      <label>備註</label>
+      <textarea id="order-note" placeholder="有其他需求可以寫在這裡"></textarea>
+    </div>
+    <button type="submit" class="solid-btn">送出訂單</button>
+  </form>
+  <iframe name="hidden-submit-frame" id="hidden-submit-frame" style="display:none"></iframe>
+</section>
+
+<!-- ========== 送出成功（自動送進 Google 表單時） ========== -->
+<section id="screen-order-success" class="screen page hidden">
+  <div class="success-box">
+    <div class="emoji">🎉</div>
+    <h2>已送出，謝謝訂購！</h2>
+    <p>我們收到您的訂單囉，會盡快跟您確認細節～</p>
+    <button id="btn-back-home-success" class="ghost-btn" style="margin-top:20px;">回首頁</button>
+  </div>
+</section>
+
+<!-- ========== 送出備援（Google 表單尚未設定時） ========== -->
+<section id="screen-order-fallback" class="screen page hidden">
+  <div class="topbar">
+    <h1>再一步就送出訂單囉</h1>
+  </div>
+  <p style="font-size:14px;color:var(--ink-soft);">請選一種方式，把下面的訂單內容送給我們：</p>
+  <div class="order-recap" id="fallback-text"></div>
+  <div style="display:flex;flex-direction:column;gap:10px;">
+    <button id="fallback-copy" class="solid-btn">複製訂單內容</button>
+    <a id="fallback-line" class="ghost-btn" style="text-align:center;text-decoration:none;" target="_blank" rel="noopener">用 LINE 傳送（貼上剛複製的內容）</a>
+    <a id="fallback-mail" class="ghost-btn" style="text-align:center;text-decoration:none;">用 Email 寄出</a>
+  </div>
+  <button id="btn-back-home-fallback" class="ghost-btn" style="margin-top:20px;width:100%;">回首頁</button>
+</section>
+
+<script src="data.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
