@@ -22,7 +22,7 @@ const PRODUCTS = {
     price: 50,
     unit: "顆",
     flavors: ["烏豆沙", "綠豆", "芋泥"],
-    img: "assets/img/danhuangsu.png",
+    img: "assets/img/danhuangsu.jpg",
   },
   shuiguosu: {
     key: "shuiguosu",
