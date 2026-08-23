@@ -126,17 +126,39 @@
 
   <form id="order-form">
     <div class="field">
-      <label>姓名 *</label>
+      <label>訂貨人姓名 *</label>
       <input type="text" id="order-name" required />
     </div>
     <div class="field">
-      <label>電話 *</label>
+      <label>訂貨人電話 *</label>
       <input type="tel" id="order-phone" required />
     </div>
     <div class="field">
-      <label>送貨日期</label>
+      <label>到貨日期</label>
       <input type="date" id="order-date" />
     </div>
+
+    <div class="section-title" style="margin-top:6px;">收貨人資訊</div>
+    <label class="checkbox-row">
+      <input type="checkbox" id="order-same-as-orderer" />
+      收貨人同訂貨人
+    </label>
+
+    <div id="order-recipient-fields">
+      <div class="field">
+        <label>收貨人姓名 *</label>
+        <input type="text" id="order-recipient-name" required />
+      </div>
+      <div class="field">
+        <label>收貨人電話 *</label>
+        <input type="tel" id="order-recipient-phone" required />
+      </div>
+      <div class="field">
+        <label>收貨人地址 *</label>
+        <input type="text" id="order-recipient-address" required />
+      </div>
+    </div>
+
     <div class="field">
       <label>備註</label>
       <textarea id="order-note" placeholder="有其他需求可以寫在這裡"></textarea>

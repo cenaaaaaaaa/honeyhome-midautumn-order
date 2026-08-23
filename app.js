@@ -7,14 +7,17 @@
 // 訂單就會自動送進表單、寄信通知。在還沒設定之前，網站會先用
 // 「複製訂單內容 / Email / LINE」的方式讓客人自己送出，網站一樣能正常使用。
 const GOOGLE_FORM = {
-  actionUrl: "", // 例：https://docs.google.com/forms/d/e/xxxxxxx/formResponse
+  actionUrl: "https://docs.google.com/forms/d/e/1FAIpQLSdzRX_5mKRMCa1sZf55RFw2w_l0ax6ZzZvWk5bGh9d2rqCt1g/formResponse",
   entries: {
-    name: "", // 例：entry.123456789
-    phone: "",
-    deliveryDate: "",
-    boxSummary: "",
-    total: "",
-    note: "",
+    name: "entry.1767283874", // 訂貨人
+    phone: "entry.680535218", // 訂貨人電話
+    recipientName: "entry.845676725", // 收貨人
+    recipientAddress: "entry.1816511539", // 收貨人地址
+    recipientPhone: "entry.769238450", // 收貨人電話
+    deliveryDate: "entry.1755457866", // 到貨日期
+    boxSummary: "entry.1123169210", // 禮盒內容
+    total: "entry.889096006", // 總金額
+    note: "entry.1197789383", // 備註
   },
 };
 
@@ -484,20 +487,37 @@ function submitOrder(e) {
   const phone = document.getElementById("order-phone").value.trim();
   const date = document.getElementById("order-date").value;
   const note = document.getElementById("order-note").value.trim();
+  const sameAsOrderer = document.getElementById("order-same-as-orderer").checked;
+
+  let recipientName = name;
+  let recipientPhone = phone;
+  let recipientAddress = "";
+  if (!sameAsOrderer) {
+    recipientName = document.getElementById("order-recipient-name").value.trim();
+    recipientPhone = document.getElementById("order-recipient-phone").value.trim();
+    recipientAddress = document.getElementById("order-recipient-address").value.trim();
+  }
+
   const summary = state.cart.map((item, idx) => `【第 ${idx + 1} 項】${item.summary}`).join("\n\n");
   const total = cartGrandTotal();
 
   if (!name || !phone) {
-    alert("請填寫姓名和電話喔！");
+    alert("請填寫訂貨人姓名和電話喔！");
+    return;
+  }
+  if (!sameAsOrderer && (!recipientName || !recipientPhone || !recipientAddress)) {
+    alert("請填寫收貨人姓名、電話和地址喔！（或勾選「收貨人同訂貨人」）");
     return;
   }
 
+  const data = { name, phone, recipientName, recipientPhone, recipientAddress, date, summary, total, note };
+
   if (GOOGLE_FORM.actionUrl) {
-    submitToGoogleForm({ name, phone, date, summary, total, note });
+    submitToGoogleForm(data);
     showOrderSuccess();
   } else {
     // Google 表單尚未設定：提供備援方式，讓客人自己選一種送出
-    showOrderFallback({ name, phone, date, summary, total, note });
+    showOrderFallback(data);
   }
 }
 
@@ -519,6 +539,9 @@ function submitToGoogleForm(data) {
 
   addField(GOOGLE_FORM.entries.name, data.name);
   addField(GOOGLE_FORM.entries.phone, data.phone);
+  addField(GOOGLE_FORM.entries.recipientName, data.recipientName);
+  addField(GOOGLE_FORM.entries.recipientPhone, data.recipientPhone);
+  addField(GOOGLE_FORM.entries.recipientAddress, data.recipientAddress);
   addField(GOOGLE_FORM.entries.deliveryDate, data.date);
   addField(GOOGLE_FORM.entries.boxSummary, data.summary);
   addField(GOOGLE_FORM.entries.total, String(data.total));
@@ -530,7 +553,18 @@ function submitToGoogleForm(data) {
 }
 
 function fullOrderText(data) {
-  return `【巧家麵包店 中秋訂購】\n姓名：${data.name}\n電話：${data.phone}\n送貨日期：${data.date || "未填"}\n\n${data.summary}\n\n訂單總金額：$${data.total}\n備註：${data.note || "無"}`;
+  return `【巧家麵包店 中秋訂購】
+訂貨人：${data.name}
+訂貨人電話：${data.phone}
+收貨人：${data.recipientName}
+收貨人電話：${data.recipientPhone}
+收貨人地址：${data.recipientAddress || "未填"}
+到貨日期：${data.date || "未填"}
+
+${data.summary}
+
+訂單總金額：$${data.total}
+備註：${data.note || "無"}`;
 }
 
 function showOrderFallback(data) {
@@ -565,16 +599,26 @@ document.addEventListener("DOMContentLoaded", () => {
   });
   document.getElementById("cart-checkout-btn").addEventListener("click", goToOrderForm);
   document.getElementById("order-form").addEventListener("submit", submitOrder);
-  document.getElementById("btn-back-home-success").addEventListener("click", () => {
+
+  document.getElementById("order-same-as-orderer").addEventListener("change", e => {
+    const same = e.target.checked;
+    document.getElementById("order-recipient-fields").classList.toggle("hidden", same);
+    ["order-recipient-name", "order-recipient-phone", "order-recipient-address"].forEach(id => {
+      document.getElementById(id).required = !same;
+    });
+  });
+  const resetOrderFormAndGoHome = () => {
     state.cart = [];
     state.screenStack = ["home"];
+    document.getElementById("order-form").reset();
+    document.getElementById("order-recipient-fields").classList.remove("hidden");
+    ["order-recipient-name", "order-recipient-phone", "order-recipient-address"].forEach(id => {
+      document.getElementById(id).required = true;
+    });
     showScreen("home");
-  });
-  document.getElementById("btn-back-home-fallback").addEventListener("click", () => {
-    state.cart = [];
-    state.screenStack = ["home"];
-    showScreen("home");
-  });
+  };
+  document.getElementById("btn-back-home-success").addEventListener("click", resetOrderFormAndGoHome);
+  document.getElementById("btn-back-home-fallback").addEventListener("click", resetOrderFormAndGoHome);
 
   showScreen("home");
 });
