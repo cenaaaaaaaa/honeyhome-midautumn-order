@@ -46,7 +46,7 @@ const PRODUCTS = {
     subtitle: null,
     price: 50,
     unit: "顆",
-    flavors: ["綠豆（素）", "蝦米肉燥（葷）", "綜合"],
+    flavors: ["綠豆（素）", "蝦米肉燥（葷）"],
     img: "assets/img/ludoupeng.png",
   },
   xiaoyuebing: {

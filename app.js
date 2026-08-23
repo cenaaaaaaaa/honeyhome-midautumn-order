@@ -519,36 +519,51 @@ function goToOrderForm() {
   goTo("screen-order-form");
 }
 
+function getPickupMethod() {
+  return document.getElementById("pickup-method-mail").classList.contains("active") ? "mail" : "pickup";
+}
+
 function submitOrder(e) {
   e.preventDefault();
+  const method = getPickupMethod();
   const name = document.getElementById("order-name").value.trim();
   const phone = document.getElementById("order-phone").value.trim();
   const date = document.getElementById("order-date").value;
   const note = document.getElementById("order-note").value.trim();
-  const sameAsOrderer = document.getElementById("order-same-as-orderer").checked;
+
+  if (!name || !phone) {
+    alert(method === "mail" ? "請填寫訂貨人姓名和電話喔！" : "請填寫聯絡人姓名和手機喔！");
+    return;
+  }
 
   let recipientName = name;
   let recipientPhone = phone;
   let recipientAddress = "";
-  if (!sameAsOrderer) {
-    recipientName = document.getElementById("order-recipient-name").value.trim();
-    recipientPhone = document.getElementById("order-recipient-phone").value.trim();
+
+  if (method === "mail") {
+    const sameAsOrderer = document.getElementById("order-same-as-orderer").checked;
+    if (!sameAsOrderer) {
+      recipientName = document.getElementById("order-recipient-name").value.trim();
+      recipientPhone = document.getElementById("order-recipient-phone").value.trim();
+      if (!recipientName || !recipientPhone) {
+        alert("請填寫收貨人姓名和電話喔！（或勾選「收貨人同訂貨人」）");
+        return;
+      }
+    }
     recipientAddress = document.getElementById("order-recipient-address").value.trim();
+    if (!recipientAddress) {
+      alert("郵寄一定要填寫收貨人地址喔！");
+      return;
+    }
   }
 
-  const summary = state.cart.map((item, idx) => `【第 ${idx + 1} 項】${item.summary}`).join("\n\n");
+  const methodLabel = method === "mail" ? "郵寄" : "自取";
+  const summary =
+    `【取貨方式：${methodLabel}】\n` +
+    state.cart.map((item, idx) => `【第 ${idx + 1} 項】${item.summary}`).join("\n\n");
   const total = cartGrandTotal();
 
-  if (!name || !phone) {
-    alert("請填寫訂貨人姓名和電話喔！");
-    return;
-  }
-  if (!sameAsOrderer && (!recipientName || !recipientPhone || !recipientAddress)) {
-    alert("請填寫收貨人姓名、電話和地址喔！（或勾選「收貨人同訂貨人」）");
-    return;
-  }
-
-  const data = { name, phone, recipientName, recipientPhone, recipientAddress, date, summary, total, note };
+  const data = { method: methodLabel, name, phone, recipientName, recipientPhone, recipientAddress, date, summary, total, note };
 
   if (GOOGLE_FORM.actionUrl) {
     submitToGoogleForm(data);
@@ -591,13 +606,16 @@ function submitToGoogleForm(data) {
 }
 
 function fullOrderText(data) {
+  const isMail = data.method === "郵寄";
+  const nameLine = isMail
+    ? `訂貨人：${data.name}\n訂貨人電話：${data.phone}\n收貨人：${data.recipientName}\n收貨人電話：${data.recipientPhone}\n收貨人地址：${data.recipientAddress}`
+    : `聯絡人：${data.name}\n聯絡人手機：${data.phone}`;
+  const dateLine = isMail ? `寄出日期：${data.date || "未填"}` : `取貨日期：${data.date || "未填"}`;
+
   return `【巧家麵包店 中秋訂購】
-訂貨人：${data.name}
-訂貨人電話：${data.phone}
-收貨人：${data.recipientName}
-收貨人電話：${data.recipientPhone}
-收貨人地址：${data.recipientAddress || "未填"}
-到貨日期：${data.date || "未填"}
+取貨方式：${data.method}
+${nameLine}
+${dateLine}
 
 ${data.summary}
 
@@ -640,19 +658,39 @@ document.addEventListener("DOMContentLoaded", () => {
 
   document.getElementById("order-same-as-orderer").addEventListener("change", e => {
     const same = e.target.checked;
-    document.getElementById("order-recipient-fields").classList.toggle("hidden", same);
-    ["order-recipient-name", "order-recipient-phone", "order-recipient-address"].forEach(id => {
+    document.getElementById("order-recipient-name-phone").classList.toggle("hidden", same);
+    ["order-recipient-name", "order-recipient-phone"].forEach(id => {
       document.getElementById(id).required = !same;
     });
   });
+
+  const setPickupMethod = method => {
+    const isMail = method === "mail";
+    document.getElementById("pickup-method-pickup").classList.toggle("active", !isMail);
+    document.getElementById("pickup-method-mail").classList.toggle("active", isMail);
+    document.getElementById("order-mail-block").classList.toggle("hidden", !isMail);
+
+    document.getElementById("order-name-label").textContent = isMail ? "訂貨人姓名 *" : "聯絡人姓名 *";
+    document.getElementById("order-phone-label").textContent = isMail ? "訂貨人電話 *" : "聯絡人手機 *";
+    document.getElementById("order-date-label").textContent = isMail ? "寄出日期" : "取貨日期";
+
+    document.getElementById("order-recipient-address").required = isMail;
+    const sameAsOrderer = document.getElementById("order-same-as-orderer");
+    if (!isMail) sameAsOrderer.checked = false;
+    ["order-recipient-name", "order-recipient-phone"].forEach(id => {
+      document.getElementById(id).required = isMail && !sameAsOrderer.checked;
+    });
+  };
+  document.getElementById("pickup-method-pickup").addEventListener("click", () => setPickupMethod("pickup"));
+  document.getElementById("pickup-method-mail").addEventListener("click", () => setPickupMethod("mail"));
+  setPickupMethod("pickup");
+
   const resetOrderFormAndGoHome = () => {
     state.cart = [];
     state.screenStack = ["home"];
     document.getElementById("order-form").reset();
-    document.getElementById("order-recipient-fields").classList.remove("hidden");
-    ["order-recipient-name", "order-recipient-phone", "order-recipient-address"].forEach(id => {
-      document.getElementById(id).required = true;
-    });
+    document.getElementById("order-recipient-name-phone").classList.remove("hidden");
+    setPickupMethod("pickup");
     showScreen("home");
   };
   document.getElementById("btn-back-home-success").addEventListener("click", resetOrderFormAndGoHome);

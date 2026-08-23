@@ -125,37 +125,45 @@
   <div class="order-recap" id="order-recap"></div>
 
   <form id="order-form">
+    <div class="section-title" style="margin-top:0;">取貨方式</div>
+    <div class="size-chip-row">
+      <button type="button" class="size-chip active" id="pickup-method-pickup" data-method="pickup">自取</button>
+      <button type="button" class="size-chip" id="pickup-method-mail" data-method="mail">郵寄</button>
+    </div>
+
     <div class="field">
-      <label>訂貨人姓名 *</label>
+      <label id="order-name-label">聯絡人姓名 *</label>
       <input type="text" id="order-name" required />
     </div>
     <div class="field">
-      <label>訂貨人電話 *</label>
+      <label id="order-phone-label">聯絡人手機 *</label>
       <input type="tel" id="order-phone" required />
     </div>
     <div class="field">
-      <label>到貨日期</label>
+      <label id="order-date-label">取貨日期</label>
       <input type="date" id="order-date" />
     </div>
 
-    <div class="section-title" style="margin-top:6px;">收貨人資訊</div>
-    <label class="checkbox-row">
-      <input type="checkbox" id="order-same-as-orderer" />
-      收貨人同訂貨人
-    </label>
+    <div id="order-mail-block" class="hidden">
+      <div class="section-title">收貨人資訊</div>
+      <label class="checkbox-row">
+        <input type="checkbox" id="order-same-as-orderer" />
+        收貨人同訂貨人
+      </label>
 
-    <div id="order-recipient-fields">
-      <div class="field">
-        <label>收貨人姓名 *</label>
-        <input type="text" id="order-recipient-name" required />
-      </div>
-      <div class="field">
-        <label>收貨人電話 *</label>
-        <input type="tel" id="order-recipient-phone" required />
+      <div id="order-recipient-name-phone">
+        <div class="field">
+          <label>收貨人姓名 *</label>
+          <input type="text" id="order-recipient-name" />
+        </div>
+        <div class="field">
+          <label>收貨人電話 *</label>
+          <input type="tel" id="order-recipient-phone" />
+        </div>
       </div>
       <div class="field">
         <label>收貨人地址 *</label>
-        <input type="text" id="order-recipient-address" required />
+        <input type="text" id="order-recipient-address" placeholder="郵寄一定要填寫地址" />
       </div>
     </div>
 
