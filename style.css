@@ -318,6 +318,24 @@ body {
 }
 
 /* ---------- Combo builder ---------- */
+.cart-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: #fff2ea;
+  border: 1.5px solid var(--gold);
+  border-radius: 14px;
+  padding: 10px 14px;
+  margin: 4px 0 14px;
+  font-size: 14px;
+  color: var(--ink);
+}
+
+.cart-banner .ghost-btn {
+  padding: 6px 14px;
+  font-size: 13px;
+}
+
 .box-select-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;

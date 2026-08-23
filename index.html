@@ -80,6 +80,7 @@
     <button class="back-btn" data-back>‹</button>
     <h1>試著組合看看</h1>
   </div>
+  <div id="cart-banner" class="cart-banner hidden"></div>
   <p style="color:var(--ink-soft);font-size:14px;">先選一款想組合的禮盒：</p>
   <div id="combo-box-grid" class="box-select-grid"></div>
 </section>
@@ -95,7 +96,22 @@
   <div id="combo-summary" class="combo-summary">
     <div id="combo-remain" class="remain"></div>
     <div id="combo-total" class="total">總金額：$0</div>
-    <button id="combo-next-btn" class="solid-btn" disabled>下一步，填寫訂購資料</button>
+    <button id="combo-next-btn" class="solid-btn" disabled>加入訂單清單</button>
+  </div>
+</section>
+
+<!-- ========== 訂單清單（購物車） ========== -->
+<section id="screen-cart" class="screen page hidden">
+  <div class="topbar">
+    <button class="back-btn" data-back>‹</button>
+    <h1>我的訂單清單</h1>
+  </div>
+  <div id="cart-list"></div>
+
+  <div class="combo-summary">
+    <div id="cart-total" class="total">訂單總金額：$0</div>
+    <button id="cart-add-more-btn" class="ghost-btn" style="width:100%;margin-bottom:10px;">再加一個禮盒</button>
+    <button id="cart-checkout-btn" class="solid-btn" disabled>填寫資料，送出訂單</button>
   </div>
 </section>
 

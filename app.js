@@ -25,6 +25,7 @@ const state = {
     size: null,
     qty: {}, // { productKey: { flavorName: number } }
   },
+  cart: [], // 已加入訂單清單的禮盒們：{ boxName, summary, total }
 };
 
 // ---------------- 畫面切換 ----------------
@@ -67,6 +68,7 @@ function initHome() {
     goTo("screen-boxes");
   });
   document.getElementById("btn-combo").addEventListener("click", () => {
+    state.cart = []; // 從首頁重新進入，訂單清單重新開始
     renderComboBoxPicker();
     goTo("screen-combo-pick");
   });
@@ -174,6 +176,21 @@ function renderBoxGallery() {
 
 // ---------------- 按鈕三：自己組合看看 ----------------
 function renderComboBoxPicker() {
+  const banner = document.getElementById("cart-banner");
+  if (state.cart.length > 0) {
+    banner.classList.remove("hidden");
+    banner.innerHTML = `
+      <span>🛒 已加入 ${state.cart.length} 項，小計 $${cartGrandTotal()}</span>
+      <button id="cart-banner-btn" class="ghost-btn">前往結帳</button>`;
+    document.getElementById("cart-banner-btn").addEventListener("click", () => {
+      renderCart();
+      goTo("screen-cart");
+    });
+  } else {
+    banner.classList.add("hidden");
+    banner.innerHTML = "";
+  }
+
   const grid = document.getElementById("combo-box-grid");
   grid.innerHTML = "";
   COMBOABLE_BOXES.forEach(box => {
@@ -403,22 +420,72 @@ function comboSummaryText(box) {
   return lines.join("\n");
 }
 
+// ---------------- 訂單清單（購物車） ----------------
+function cartGrandTotal() {
+  return state.cart.reduce((sum, item) => sum + item.total, 0);
+}
+
+function addCurrentToCart() {
+  const box = findBox(state.combo.boxId);
+  state.cart.push({
+    boxName: box.name,
+    summary: comboSummaryText(box),
+    total: comboTotalPrice(box),
+  });
+  renderCart();
+  goTo("screen-cart");
+}
+
+function renderCart() {
+  const wrap = document.getElementById("cart-list");
+  wrap.innerHTML = "";
+
+  if (state.cart.length === 0) {
+    wrap.innerHTML = `<p style="color:var(--ink-soft);font-size:14px;">目前訂單清單是空的，先去選一款禮盒吧！</p>`;
+  }
+
+  state.cart.forEach((item, idx) => {
+    const el = document.createElement("div");
+    el.className = "order-recap";
+    el.style.position = "relative";
+    el.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+        <strong style="color:var(--maroon);">第 ${idx + 1} 項</strong>
+        <button class="ghost-btn" data-remove="${idx}" style="padding:4px 12px;font-size:12px;">移除</button>
+      </div>
+      ${item.summary.replace(/\n/g, "<br>")}
+    `;
+    wrap.appendChild(el);
+  });
+
+  wrap.querySelectorAll("[data-remove]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      state.cart.splice(Number(btn.dataset.remove), 1);
+      renderCart();
+    });
+  });
+
+  document.getElementById("cart-total").textContent = `訂單總金額：$${cartGrandTotal()}`;
+  document.getElementById("cart-checkout-btn").disabled = state.cart.length === 0;
+}
+
 // ---------------- 訂單表單 ----------------
 function goToOrderForm() {
-  const box = findBox(state.combo.boxId);
-  document.getElementById("order-recap").textContent = comboSummaryText(box);
+  const recap = state.cart
+    .map((item, idx) => `【第 ${idx + 1} 項】\n${item.summary}`)
+    .join("\n\n");
+  document.getElementById("order-recap").textContent = `${recap}\n\n訂單總金額：$${cartGrandTotal()}`;
   goTo("screen-order-form");
 }
 
 function submitOrder(e) {
   e.preventDefault();
-  const box = findBox(state.combo.boxId);
   const name = document.getElementById("order-name").value.trim();
   const phone = document.getElementById("order-phone").value.trim();
   const date = document.getElementById("order-date").value;
   const note = document.getElementById("order-note").value.trim();
-  const summary = comboSummaryText(box);
-  const total = comboTotalPrice(box);
+  const summary = state.cart.map((item, idx) => `【第 ${idx + 1} 項】${item.summary}`).join("\n\n");
+  const total = cartGrandTotal();
 
   if (!name || !phone) {
     alert("請填寫姓名和電話喔！");
@@ -463,7 +530,7 @@ function submitToGoogleForm(data) {
 }
 
 function fullOrderText(data) {
-  return `【巧家麵包店 中秋訂購】\n姓名：${data.name}\n電話：${data.phone}\n送貨日期：${data.date || "未填"}\n${data.summary}\n備註：${data.note || "無"}`;
+  return `【巧家麵包店 中秋訂購】\n姓名：${data.name}\n電話：${data.phone}\n送貨日期：${data.date || "未填"}\n\n${data.summary}\n\n訂單總金額：$${data.total}\n備註：${data.note || "無"}`;
 }
 
 function showOrderFallback(data) {
@@ -491,13 +558,20 @@ function showOrderSuccess() {
 document.addEventListener("DOMContentLoaded", () => {
   initHome();
 
-  document.getElementById("combo-next-btn").addEventListener("click", goToOrderForm);
+  document.getElementById("combo-next-btn").addEventListener("click", addCurrentToCart);
+  document.getElementById("cart-add-more-btn").addEventListener("click", () => {
+    renderComboBoxPicker();
+    goTo("screen-combo-pick");
+  });
+  document.getElementById("cart-checkout-btn").addEventListener("click", goToOrderForm);
   document.getElementById("order-form").addEventListener("submit", submitOrder);
   document.getElementById("btn-back-home-success").addEventListener("click", () => {
+    state.cart = [];
     state.screenStack = ["home"];
     showScreen("home");
   });
   document.getElementById("btn-back-home-fallback").addEventListener("click", () => {
+    state.cart = [];
     state.screenStack = ["home"];
     showScreen("home");
   });
