@@ -274,26 +274,56 @@ function comboTotalPrice(box) {
   return total;
 }
 
-function changeQty(productKey, flavor, delta, box) {
+// 這個口味目前最多還能填多少（扣掉同一組裡其他口味已經佔用的數量）
+function maxAllowedForFlavor(box, productKey, flavor) {
   const qtyObj = state.combo.qty[productKey];
   const current = qtyObj[flavor] || 0;
-  const next = current + delta;
-  if (next < 0) return;
 
-  // 檢查是否超過這個部分（單品/固定子配額）的上限
-  const partTarget = comboTargetForPart(box, productKey);
-  if (box.type === "mixFixed" && partTarget != null) {
-    const partSum = sumQty(qtyObj) - current + next;
-    if (partSum > partTarget) return;
+  if (box.type === "mixFixed") {
+    const partTarget = comboTargetForPart(box, productKey);
+    const partSumOthers = sumQty(qtyObj) - current;
+    return Math.max(0, partTarget - partSumOthers);
   }
-  if (box.type === "single" || box.type === "mixFree") {
-    const overallTarget = comboOverallTarget(box);
-    const overallSum = comboOverallSelected(box) - current + next;
-    if (overallTarget != null && overallSum > overallTarget) return;
-  }
+  const overallTarget = comboOverallTarget(box);
+  const overallSumOthers = comboOverallSelected(box) - current;
+  return Math.max(0, overallTarget - overallSumOthers);
+}
 
-  qtyObj[flavor] = next;
-  renderComboDetail();
+// 把某個口味的數量直接設成指定值（超過上限會自動夾住），回傳實際套用的數字
+function setQty(productKey, flavor, rawValue, box) {
+  const max = maxAllowedForFlavor(box, productKey, flavor);
+  let val = parseInt(rawValue, 10);
+  if (isNaN(val) || val < 0) val = 0;
+  if (val > max) val = max;
+  state.combo.qty[productKey][flavor] = val;
+  return val;
+}
+
+// +/− 按鈕：只更新這一格的數字跟下方總計，不重畫整個畫面（才不會打斷輸入）
+function bumpQty(productKey, flavor, delta, box) {
+  const current = state.combo.qty[productKey][flavor] || 0;
+  const next = setQty(productKey, flavor, current + delta, box);
+  const input = document.querySelector(`.qty-num-input[data-key="${productKey}"][data-flavor="${flavor}"]`);
+  if (input) input.value = next;
+  updateComboSummary(box);
+}
+
+// 直接打數字輸入
+function handleQtyInput(e) {
+  const box = findBox(state.combo.boxId);
+  if (!box) return;
+  const { key, flavor } = e.target.dataset;
+  const raw = e.target.value;
+  const clamped = setQty(key, flavor, raw, box);
+  // 輸入框還空著時先不強制蓋成 0，才不會打斷還在打字的人
+  if (raw !== "" && String(clamped) !== raw) {
+    e.target.value = clamped;
+  }
+  updateComboSummary(box);
+}
+
+function handleQtyBlur(e) {
+  if (e.target.value === "") e.target.value = "0";
 }
 
 function renderComboDetail() {
@@ -335,7 +365,8 @@ function renderComboDetail() {
           <span class="fname">${flavor}</span>
           <div class="qty-control">
             <button class="qty-btn" data-action="dec" data-key="${productKey}" data-flavor="${flavor}">−</button>
-            <span class="qty-num">${q}</span>
+            <input class="qty-num-input" type="number" inputmode="numeric" min="0" step="1"
+                   value="${q}" data-key="${productKey}" data-flavor="${flavor}">
             <button class="qty-btn" data-action="inc" data-key="${productKey}" data-flavor="${flavor}">＋</button>
           </div>
         </div>`;
@@ -371,8 +402,15 @@ function renderComboDetail() {
   document.querySelectorAll(".qty-btn").forEach(btn => {
     btn.addEventListener("click", () => {
       const delta = btn.dataset.action === "inc" ? 1 : -1;
-      changeQty(btn.dataset.key, btn.dataset.flavor, delta, box);
+      bumpQty(btn.dataset.key, btn.dataset.flavor, delta, box);
     });
+  });
+
+  // 綁定數量輸入框（可以直接打數字，不用一直按 +）
+  document.querySelectorAll(".qty-num-input").forEach(input => {
+    input.addEventListener("input", handleQtyInput);
+    input.addEventListener("blur", handleQtyBlur);
+    input.addEventListener("focus", () => input.select());
   });
 
   updateComboSummary(box);
