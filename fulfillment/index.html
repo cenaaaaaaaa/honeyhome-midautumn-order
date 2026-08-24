@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>巧家麵包店｜出貨系統</title>
+<link rel="stylesheet" href="../style.css" />
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<!-- ========== 密碼保護 ========== -->
+<section id="screen-password" class="screen page">
+  <div class="brand-header">
+    <div class="brand-name">巧家麵包店</div>
+    <div class="brand-sub">出貨系統</div>
+    <div class="brand-divider"></div>
+  </div>
+  <div class="field" style="margin-top:24px;">
+    <label>請輸入通關密碼</label>
+    <input type="password" id="pwd-input" placeholder="密碼" />
+  </div>
+  <div id="pwd-error" class="alert-note hidden"></div>
+  <button id="pwd-submit" class="solid-btn">進入系統</button>
+</section>
+
+<!-- ========== 選操作人員 ========== -->
+<section id="screen-operator" class="screen page hidden">
+  <div class="brand-header">
+    <div class="brand-name">巧家麵包店</div>
+    <div class="brand-sub">出貨系統</div>
+    <div class="brand-divider"></div>
+  </div>
+  <p style="text-align:center;color:var(--ink-soft);margin-top:20px;">現在是誰在操作？</p>
+  <div id="operator-grid" class="operator-grid"></div>
+</section>
+
+<!-- ========== 功能選單 ========== -->
+<section id="screen-menu" class="screen page hidden">
+  <div class="topbar">
+    <div id="menu-operator-badge" class="operator-badge"></div>
+    <button id="btn-switch-operator" class="ghost-btn" style="margin-left:auto;padding:6px 14px;font-size:12px;">切換操作人</button>
+  </div>
+  <div class="big-nav">
+    <button id="btn-key-order" class="big-btn">
+      <span class="icon">✍️</span>
+      <div>
+        <div class="label">key 訂單</div>
+        <div class="desc">手動輸入一張新訂單</div>
+      </div>
+    </button>
+    <button id="btn-daily" class="big-btn">
+      <span class="icon">📅</span>
+      <div>
+        <div class="label">查看每日訂單</div>
+        <div class="desc">依日期看每天要出的貨</div>
+      </div>
+    </button>
+    <button id="btn-shipping" class="big-btn">
+      <span class="icon">📦</span>
+      <div>
+        <div class="label">出貨</div>
+        <div class="desc">找一張訂單，處理完標記完成</div>
+      </div>
+    </button>
+  </div>
+</section>
+
+<!-- ========== key 訂單 ========== -->
+<section id="screen-key-order" class="screen page hidden">
+  <div class="topbar">
+    <button class="back-btn" data-back>‹</button>
+    <h1>key 訂單</h1>
+  </div>
+
+  <form id="key-order-form">
+    <div class="field">
+      <label>建立人</label>
+      <input type="text" id="ko-operator" disabled />
+    </div>
+
+    <div class="section-title" style="margin-top:0;">取貨方式</div>
+    <div class="size-chip-row" id="ko-method-row"></div>
+
+    <div class="field">
+      <label>取貨日期</label>
+      <input type="date" id="ko-pickup-date" />
+    </div>
+    <div class="field">
+      <label>寄件日期（郵寄才需要）</label>
+      <input type="date" id="ko-mail-date" />
+    </div>
+
+    <div class="field">
+      <label>訂購人姓名</label>
+      <input type="text" id="ko-name" />
+    </div>
+    <div class="field">
+      <label>訂購人電話</label>
+      <input type="tel" id="ko-phone" />
+    </div>
+    <div class="field">
+      <label>收件人姓名（留空同訂購人）</label>
+      <input type="text" id="ko-recipient-name" />
+    </div>
+    <div class="field">
+      <label>收件人電話（留空同訂購人）</label>
+      <input type="tel" id="ko-recipient-phone" />
+    </div>
+    <div class="field">
+      <label>收件地址（郵寄才需要）</label>
+      <input type="text" id="ko-address" />
+    </div>
+
+    <div class="section-title">品項明細</div>
+    <div id="ko-lines"></div>
+    <button type="button" id="ko-add-line" class="ghost-btn" style="width:100%;margin:8px 0 18px;">＋ 新增一項品項</button>
+
+    <div class="field">
+      <label>總金額</label>
+      <input type="number" id="ko-total" inputmode="numeric" min="0" step="1" />
+    </div>
+    <div class="field">
+      <label>備註</label>
+      <textarea id="ko-note"></textarea>
+    </div>
+
+    <button type="submit" class="solid-btn">送出訂單</button>
+  </form>
+
+  <div id="ko-result" class="hidden">
+    <div class="section-title">✅ 訂單已建立</div>
+    <div id="ko-day-summary" class="order-recap"></div>
+    <button id="ko-new-order" class="ghost-btn" style="width:100%;margin-top:10px;">再 key 一張</button>
+    <button id="ko-back-menu" class="solid-btn" style="margin-top:10px;">回功能選單</button>
+  </div>
+</section>
+
+<!-- ========== 品項列模板（JS 會複製這個區塊） ========== -->
+<template id="ko-line-template">
+  <div class="ko-line flavor-row" style="flex-wrap:wrap;">
+    <select class="ko-line-product"></select>
+    <select class="ko-line-flavor"></select>
+    <input type="number" class="ko-line-qty" min="1" step="1" value="1" />
+    <button type="button" class="ko-line-remove qty-btn">×</button>
+  </div>
+</template>
+
+<!-- ========== 查看每日訂單（日曆） ========== -->
+<section id="screen-daily" class="screen page hidden">
+  <div class="topbar">
+    <button class="back-btn" data-back>‹</button>
+    <h1>查看每日訂單</h1>
+    <button id="btn-toggle-view" class="ghost-btn" style="margin-left:auto;padding:6px 14px;font-size:12px;">改用清單顯示</button>
+  </div>
+
+  <div id="calendar-view">
+    <div class="cal-header">
+      <button id="cal-prev" class="back-btn">‹</button>
+      <div id="cal-title" class="cal-title"></div>
+      <button id="cal-next" class="back-btn">›</button>
+    </div>
+    <div class="cal-weekdays">
+      <div>日</div><div>一</div><div>二</div><div>三</div><div>四</div><div>五</div><div>六</div>
+    </div>
+    <div id="cal-grid" class="cal-grid"></div>
+  </div>
+
+  <div id="list-view" class="hidden"></div>
+</section>
+
+<!-- ========== 某一天的訂單列表 ========== -->
+<section id="screen-day-detail" class="screen page hidden">
+  <div class="topbar">
+    <button class="back-btn" data-back>‹</button>
+    <h1 id="day-detail-title">當天訂單</h1>
+  </div>
+  <div id="day-summary" class="order-recap"></div>
+  <div id="day-order-list"></div>
+</section>
+
+<!-- ========== 訂單詳情（出貨） ========== -->
+<section id="screen-order-detail" class="screen page hidden">
+  <div class="topbar">
+    <button class="back-btn" data-back>‹</button>
+    <h1>訂單詳情</h1>
+  </div>
+  <div id="order-detail-body"></div>
+  <button id="order-toggle-status" class="solid-btn" style="margin-top:16px;">標記完成</button>
+</section>
+
+<!-- ========== 出貨（找訂單入口，直接沿用查看每日訂單） ========== -->
+
+<script src="data.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

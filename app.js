@@ -18,6 +18,10 @@ const GOOGLE_FORM = {
     boxSummary: "entry.1123169210", // 禮盒內容
     total: "entry.889096006", // 總金額
     note: "entry.1197789383", // 備註
+    // 給出貨系統用的結構化明細（給每日備料彙總用）。
+    // 在 Google 表單新增一題「明細JSON」（段落文字類型），把產生的 entry.xxxx 填在這裡就會開始送資料，
+    // 填之前這裡留空字串完全不影響原本 9 個欄位的送出，客人端畫面也不會有任何變化。
+    detailJson: "",
   },
 };
 
@@ -507,6 +511,19 @@ function comboSummaryText(box) {
   return lines.join("\n");
 }
 
+// 給出貨系統用的結構化明細：把這盒的品項/口味/數量整理成好加總的格式，
+// 不影響畫面上人看的 comboSummaryText，純粹多存一份給機器讀。
+function comboStructured(box) {
+  const keys = box.type === "single" ? [box.productKey] : box.type === "mixFree" ? box.productKeys : box.parts.map(p => p.productKey);
+  return keys.map(k => {
+    const qtyObj = state.combo.qty[k] || {};
+    const flavors = Object.entries(qtyObj)
+      .filter(([, q]) => q > 0)
+      .map(([flavor, qty]) => ({ flavor, qty }));
+    return { productKey: k, productName: PRODUCTS[k].name, flavors };
+  }).filter(entry => entry.flavors.length > 0);
+}
+
 // ---------------- 訂單清單（購物車） ----------------
 function cartGrandTotal() {
   return state.cart.reduce((sum, item) => sum + item.total, 0);
@@ -516,7 +533,11 @@ function addCurrentToCart() {
   const box = findBox(state.combo.boxId);
   state.cart.push({
     boxName: box.name,
+    boxId: box.id,
+    size: state.combo.size,
+    boxQty: state.combo.boxQty,
     summary: comboSummaryText(box),
+    items: comboStructured(box),
     total: comboTotalPrice(box) * state.combo.boxQty,
   });
   renderCart();
@@ -608,8 +629,19 @@ function submitOrder(e) {
     `【取貨方式：${methodLabel}】\n` +
     state.cart.map((item, idx) => `【第 ${idx + 1} 項】${item.summary}`).join("\n\n");
   const total = cartGrandTotal();
+  const detailJson = JSON.stringify({
+    method: methodLabel,
+    boxes: state.cart.map(item => ({
+      boxName: item.boxName,
+      boxId: item.boxId,
+      size: item.size,
+      boxQty: item.boxQty,
+      items: item.items,
+      total: item.total,
+    })),
+  });
 
-  const data = { method: methodLabel, name, phone, recipientName, recipientPhone, recipientAddress, date, summary, total, note };
+  const data = { method: methodLabel, name, phone, recipientName, recipientPhone, recipientAddress, date, summary, total, note, detailJson };
 
   if (GOOGLE_FORM.actionUrl) {
     submitToGoogleForm(data);
@@ -645,6 +677,7 @@ function submitToGoogleForm(data) {
   addField(GOOGLE_FORM.entries.boxSummary, data.summary);
   addField(GOOGLE_FORM.entries.total, String(data.total));
   addField(GOOGLE_FORM.entries.note, data.note);
+  addField(GOOGLE_FORM.entries.detailJson, data.detailJson);
 
   document.body.appendChild(form);
   form.submit();
