@@ -42,7 +42,7 @@ function doGet(e) {
 
     if (params.action === "orders" || !params.action) {
       syncFormOrders_();
-      backfillMissingLines_();
+      backfillBoxes_();
       const orders = readShipOrders_();
       return jsonOut_({ ok: true, orders });
     }
@@ -72,6 +72,11 @@ function doPost(e) {
 
     if (body.action === "deleteOrder") {
       deleteOrder_(body.orderId, body.operator);
+      return jsonOut_({ ok: true });
+    }
+
+    if (body.action === "updateBoxStatus") {
+      updateBoxStatus_(body.orderId, body.boxIndex, body.done);
       return jsonOut_({ ok: true });
     }
 
@@ -153,9 +158,9 @@ function readShipOrders_() {
       obj["完成時間"] = formatDateTime_(obj["完成時間"]);
       obj["刪除時間"] = formatDateTime_(obj["刪除時間"]);
       try {
-        obj["品項明細"] = obj["品項明細JSON"] ? JSON.parse(obj["品項明細JSON"]) : { lines: [] };
+        obj["品項明細"] = obj["品項明細JSON"] ? JSON.parse(obj["品項明細JSON"]) : { boxes: [] };
       } catch (err) {
-        obj["品項明細"] = { lines: [] };
+        obj["品項明細"] = { boxes: [] };
       }
       return obj;
     });
@@ -165,7 +170,13 @@ function addManualOrder_(order) {
   const sheet = getShipSheet_();
   const id = Utilities.getUuid();
   const now = new Date();
-  const lines = Array.isArray(order.lines) ? order.lines : [];
+  const boxes = (Array.isArray(order.boxes) ? order.boxes : []).map(b => ({
+    boxName: b.boxName || "",
+    size: b.size || null,
+    boxQty: b.boxQty || 1,
+    lines: Array.isArray(b.lines) ? b.lines : [],
+    done: false,
+  }));
 
   const row = buildRowByHeaderName_(sheet, {
     "訂單ID": id,
@@ -179,7 +190,7 @@ function addManualOrder_(order) {
     "收貨人姓名": order.recipientName || "",
     "收貨人電話": order.recipientPhone || "",
     "收貨人地址": order.recipientAddress || "",
-    "品項明細JSON": JSON.stringify({ lines }),
+    "品項明細JSON": JSON.stringify({ boxes }),
     "總金額": order.total || "",
     "備註": order.note || "",
     "出貨狀態": "未處理",
@@ -234,6 +245,29 @@ function deleteOrder_(orderId, operator) {
   sheet.getRange(rowNum, delAtCol + 1).setValue(new Date());
 }
 
+// 單一品項（禮盒組合）的完成狀態，存在「品項明細JSON」欄位裡 boxes[boxIndex].done，
+// 跟「整張訂單」的出貨狀態是分開的兩件事：一張訂單可能有好幾個品項，
+// 各自包裝完成的進度用這個記錄，全部包完之後再用整張訂單的「標記完成」做總結。
+function updateBoxStatus_(orderId, boxIndex, done) {
+  if (boxIndex == null) throw new Error("缺少 boxIndex");
+  const sheet = getShipSheet_();
+  const { rowNum, headers } = findShipRow_(sheet, orderId);
+  const detailCol = headers.indexOf("品項明細JSON");
+  const cell = sheet.getRange(rowNum, detailCol + 1);
+
+  let detail;
+  try {
+    detail = JSON.parse(cell.getValue() || "{}");
+  } catch (err) {
+    detail = {};
+  }
+  if (!Array.isArray(detail.boxes) || !detail.boxes[boxIndex]) {
+    throw new Error("找不到這個品項");
+  }
+  detail.boxes[boxIndex].done = !!done;
+  cell.setValue(JSON.stringify(detail));
+}
+
 // ---------- 同步：把客人網頁下的新訂單，從表單回應表搬一份進出貨管理 ----------
 
 function syncFormOrders_() {
@@ -279,14 +313,15 @@ function syncFormOrders_() {
     const methodMatch = summaryText.match(/【取貨方式[：:]\s*([^】]+)】/);
     const method = methodMatch ? methodMatch[1] : "";
 
-    // 優先用結構化的 detailJson（如果有設定的話最準），沒有的話直接從「禮盒內容」文字解析，
+    // 優先用結構化的 detailJson（如果有設定的話最準，還帶有品項分組），
+    // 沒有的話直接從「禮盒內容」文字解析並依「【第 N 項】」分組，
     // 這個文字格式是網頁自己固定產生的，解析起來很可靠，不強制要求一定要設定 detailJson 才能用。
-    let lines = [];
+    let boxes = [];
     if (colDetailJson != null && data[r][colDetailJson]) {
-      lines = flattenDetailJson_(data[r][colDetailJson]);
+      boxes = groupedBoxesFromDetailJson_(data[r][colDetailJson]);
     }
-    if (!lines.length) {
-      lines = parseSummaryLines_(summaryText);
+    if (!boxes.length) {
+      boxes = parseSummaryBoxes_(summaryText);
     }
 
     newRows.push(buildRowByHeaderName_(shipSheet, {
@@ -301,7 +336,7 @@ function syncFormOrders_() {
       "收貨人姓名": colRecipientName != null ? data[r][colRecipientName] : "",
       "收貨人電話": colRecipientPhone != null ? data[r][colRecipientPhone] : "",
       "收貨人地址": colRecipientAddress != null ? data[r][colRecipientAddress] : "",
-      "品項明細JSON": JSON.stringify({ lines: lines, raw: summaryText }),
+      "品項明細JSON": JSON.stringify({ boxes: boxes, raw: summaryText }),
       "總金額": colTotal != null ? data[r][colTotal] : "",
       "備註": colNote != null ? data[r][colNote] : "",
       "出貨狀態": "未處理",
@@ -315,66 +350,74 @@ function syncFormOrders_() {
   }
 }
 
-// 把訂購網頁送過來的 detailJson（{method, boxes:[{items:[{productName, flavors:[{flavor,qty}]}], boxQty}]}）
-// 攤平成統一的 {productName, flavor, qty} 陣列，跟手動輸入的訂單用同一種格式，方便加總。
-function flattenDetailJson_(raw) {
+// 把訂購網頁送過來的 detailJson（{method, boxes:[{boxName, size, boxQty, items:[{productName, flavors:[{flavor,qty}]}]}]}）
+// 轉成出貨系統統一的分組格式：每個禮盒品項一組，組內是 {productName, flavor, qty} 清單，
+// 這樣才能讓每個品項各自標記完成，不是整張訂單綁在一起。
+function groupedBoxesFromDetailJson_(raw) {
   try {
     const parsed = JSON.parse(raw);
-    const lines = [];
-    (parsed.boxes || []).forEach(box => {
+    return (parsed.boxes || []).map(box => {
       const boxQty = box.boxQty || 1;
+      const lines = [];
       (box.items || []).forEach(item => {
         (item.flavors || []).forEach(f => {
-          lines.push({
-            productName: item.productName,
-            flavor: f.flavor,
-            qty: (f.qty || 0) * boxQty,
-          });
+          lines.push({ productName: item.productName, flavor: f.flavor, qty: (f.qty || 0) * boxQty });
         });
       });
+      return { boxName: box.boxName || "", size: box.size || null, boxQty: boxQty, lines: lines, done: false };
     });
-    return lines;
   } catch (err) {
     return [];
   }
 }
 
-// 從「禮盒內容」的原始文字直接解析出 {productName, flavor, qty} 清單。
-// 文字格式是訂購網頁自己固定產生的，長得像：
-//   禮盒：蛋黃酥禮盒
+// 從「禮盒內容」的原始文字直接解析出分組的品項清單。文字格式是訂購網頁自己固定產生的，
+// 每個品項用「【第 N 項】」隔開，長得像：
+//   【第 1 項】禮盒：蛋黃酥禮盒
 //   份量：15 入
 //   蛋黃酥：綠豆 x10、烏豆沙 x2、芋泥 x3
 //   總金額：$750
-// 只挑「品名：口味 x數量、口味 x數量」這種列來解析，「禮盒/份量/訂購盒數/總金額」這些說明列會跳過。
-function parseSummaryLines_(summaryText) {
-  const lines = [];
-  if (!summaryText) return lines;
-  const skipLabels = ["禮盒", "份量", "訂購盒數", "總金額", "取貨方式"];
+// 「禮盒/份量/訂購盒數/總金額」這些是說明列，其餘的「品名：口味 x數量」列才是實際品項。
+function parseSummaryBoxes_(summaryText) {
+  if (!summaryText) return [];
+  const text = String(summaryText).replace(/^【取貨方式[：:][^】]*】\n?/, "");
+  const blocks = text.split(/(?=【第\s*\d+\s*項】)/).map(b => b.trim()).filter(Boolean);
 
-  String(summaryText).split("\n").forEach(rawRow => {
-    // 每張訂單的第一個品項行會有「【第 1 項】」這種前綴，先拿掉再判斷
-    const row = rawRow.trim().replace(/^【第\s*\d+\s*項】/, "").trim();
-    const m = row.match(/^([^：]+)：(.+)$/);
-    if (!m) return;
-    const label = m[1].trim();
-    if (skipLabels.some(s => label.indexOf(s) !== -1)) return;
+  // 沒有「【第 N 項】」這種分組標記（例如很舊的測試資料），整段當一個品項處理
+  const sourceBlocks = blocks.length ? blocks : (text.trim() ? [text.trim()] : []);
 
-    const productName = label;
-    m[2].split("、").forEach(part => {
-      const fm = part.trim().match(/^(.+?)\s*[x×]\s*(\d+)\s*$/i);
-      if (fm) {
-        lines.push({ productName: productName, flavor: fm[1].trim(), qty: Number(fm[2]) });
-      }
+  return sourceBlocks.map(block => {
+    const cleaned = block.replace(/^【第\s*\d+\s*項】/, "");
+    const rows = cleaned.split("\n").map(r => r.trim()).filter(Boolean);
+    let boxName = "";
+    let size = null;
+    let boxQty = 1;
+    const lines = [];
+
+    rows.forEach(row => {
+      const m = row.match(/^([^：]+)：(.+)$/);
+      if (!m) return;
+      const label = m[1].trim();
+      const rest = m[2].trim();
+      if (label.indexOf("禮盒") !== -1) { boxName = rest; return; }
+      if (label.indexOf("份量") !== -1) { size = rest; return; }
+      if (label.indexOf("訂購盒數") !== -1) { boxQty = parseInt(rest, 10) || 1; return; }
+      if (label.indexOf("總金額") !== -1) return;
+
+      rest.split("、").forEach(part => {
+        const fm = part.trim().match(/^(.+?)\s*[x×]\s*(\d+)\s*$/i);
+        if (fm) lines.push({ productName: label, flavor: fm[1].trim(), qty: Number(fm[2]) });
+      });
     });
-  });
 
-  return lines;
+    return { boxName: boxName, size: size, boxQty: boxQty, lines: lines, done: false };
+  }).filter(box => box.lines.length || box.boxName);
 }
 
-// 一次性補救：出貨管理分頁裡，之前同步進來但因為還沒有這個文字解析功能、
-// 品項明細是空的客人訂單，重新用它們身上留著的原始文字（raw）解析一次，
-// 補進正確的品項清單，用 setValue 直接改同一格，不會新增或刪除任何一列/一欄。
-function backfillMissingLines_() {
+// 一次性補救：出貨管理分頁裡，之前同步進來但還是舊格式（沒有分組 boxes，
+// 或是還沒有品項明細）的客人訂單，重新用它們身上留著的原始文字（raw）解析一次，
+// 補成分組格式，用 setValue 直接改同一格，不會新增或刪除任何一列/一欄。
+function backfillBoxes_() {
   const sheet = getShipSheet_();
   const range = sheet.getDataRange().getValues();
   if (range.length < 2) return;
@@ -393,12 +436,12 @@ function backfillMissingLines_() {
     } catch (err) {
       continue;
     }
-    if (parsed.lines && parsed.lines.length) continue; // 已經有明細，不用補
+    if (Array.isArray(parsed.boxes) && parsed.boxes.length) continue; // 已經是分組格式，不用補
     if (!parsed.raw) continue; // 沒有原始文字可以重新解析
 
-    const newLines = parseSummaryLines_(parsed.raw);
-    if (newLines.length) {
-      sheet.getRange(i + 1, detailCol + 1).setValue(JSON.stringify({ lines: newLines, raw: parsed.raw }));
+    const newBoxes = parseSummaryBoxes_(parsed.raw);
+    if (newBoxes.length) {
+      sheet.getRange(i + 1, detailCol + 1).setValue(JSON.stringify({ boxes: newBoxes, raw: parsed.raw }));
     }
   }
 }

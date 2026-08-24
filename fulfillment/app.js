@@ -627,7 +627,14 @@ async function submitKeyOrder(e) {
     return;
   }
 
-  const lines = state.koCart.flatMap(item => item.lines);
+  // 每個禮盒品項各自一組（保留分組），出貨系統才能讓每個品項分開標記完成，
+  // 不是整張訂單送出後就變成一條攤平的清單。
+  const boxes = state.koCart.map(item => ({
+    boxName: item.boxName,
+    size: item.size,
+    boxQty: item.boxQty,
+    lines: item.lines,
+  }));
   const pickupDate = document.getElementById("ko-pickup-date").value;
   const mailDate = document.getElementById("ko-mail-date").value;
 
@@ -643,7 +650,7 @@ async function submitKeyOrder(e) {
     recipientAddress: document.getElementById("ko-address").value.trim(),
     total: Number(document.getElementById("ko-total").value) || 0,
     note: document.getElementById("ko-note").value.trim(),
-    lines,
+    boxes,
   };
 
   const submitBtn = e.target.querySelector('button[type="submit"]');
@@ -679,12 +686,25 @@ function shipDate(order) {
   return order["寄件日期"] || order["取貨日期"] || "";
 }
 
+// 品項明細現在是「分組」格式（boxes: [{..., lines}]），這裡統一攤平回單一清單給彙總用。
+// 也相容極少數還沒有分組、只有 lines 的舊資料。
+function orderBoxes(order) {
+  const detail = order["品項明細"] || {};
+  return Array.isArray(detail.boxes) ? detail.boxes : [];
+}
+
+function orderAllLines(order) {
+  const detail = order["品項明細"] || {};
+  const boxes = orderBoxes(order);
+  if (boxes.length) return boxes.flatMap(b => b.lines || []);
+  return detail.lines || [];
+}
+
 function aggregateByDate(dateStr) {
   const map = new Map();
   state.orders.forEach(order => {
     if (shipDate(order) !== dateStr) return;
-    const lines = (order["品項明細"] && order["品項明細"].lines) || [];
-    lines.forEach(l => {
+    orderAllLines(order).forEach(l => {
       const key = `${l.productName}｜${l.flavor}`;
       map.set(key, (map.get(key) || 0) + Number(l.qty || 0));
     });
@@ -865,15 +885,30 @@ function renderOrderDetail() {
   const joinIfAny = (a, b) => (a || b ? `${a || ""}　${b || ""}` : "");
 
   const detail = order["品項明細"] || {};
-  const lines = detail.lines || [];
-  let linesHtml;
-  if (lines.length) {
-    linesHtml = lines.map(l => `<div class="detail-row"><span class="k">${l.productName}｜${l.flavor}</span><span class="v">${l.qty}</span></div>`).join("");
+  const boxes = orderBoxes(order);
+  let boxesHtml;
+  if (boxes.length) {
+    // 每個禮盒品項各自一張卡片，各自可以標記完成，方便包裝時一項一項核對打勾
+    boxesHtml = boxes.map((box, idx) => {
+      const boxDone = !!box.done;
+      const titleParts = [box.boxName || "（未命名品項）"];
+      if (box.size) titleParts.push(box.size);
+      if (box.boxQty > 1) titleParts.push(`${box.boxQty} 盒`);
+      const linesHtml = (box.lines || [])
+        .map(l => `<div class="detail-row"><span class="k">${l.productName}｜${l.flavor}</span><span class="v">${l.qty}</span></div>`)
+        .join("") || `<div class="detail-row"><span class="k">（沒有品項明細）</span></div>`;
+      return `
+        <div class="order-card ${boxDone ? "done" : ""}" style="cursor:default;" data-box-index="${idx}">
+          <div class="row1"><span>${titleParts.join("　")}</span><span class="status-tag ${boxDone ? "done" : "pending"}">${boxDone ? "已完成" : "未處理"}</span></div>
+          ${linesHtml}
+          <button type="button" class="ghost-btn box-toggle-btn" data-box-index="${idx}" style="width:100%;margin-top:10px;">${boxDone ? "取消完成" : "這個品項標記完成"}</button>
+        </div>`;
+    }).join("");
   } else if (detail.raw) {
     // 品項解析不出來時，至少把原始訂單內容整段顯示出來，不會讓人完全看不到訂單寫了什麼
-    linesHtml = `<div class="order-recap" style="margin:0;">${String(detail.raw).replace(/\n/g, "<br>")}</div>`;
+    boxesHtml = `<div class="order-recap" style="margin:0;">${String(detail.raw).replace(/\n/g, "<br>")}</div>`;
   } else {
-    linesHtml = `<div class="detail-row"><span class="k">品項明細</span><span class="v">（沒有明細資料，請看備註）</span></div>`;
+    boxesHtml = `<div class="detail-row"><span class="k">品項明細</span><span class="v">（沒有明細資料，請看備註）</span></div>`;
   }
 
   const rows = [
@@ -891,15 +926,38 @@ function renderOrderDetail() {
 
   body.innerHTML =
     rows.map(([k, v]) => `<div class="detail-row"><span class="k">${k}</span><span class="v">${v}</span></div>`).join("") +
-    `<div class="section-title">品項明細</div>${linesHtml}`;
+    `<div class="section-title">品項明細（${boxes.length || 0} 項）</div>${boxesHtml}`;
+
+  body.querySelectorAll(".box-toggle-btn").forEach(btn => {
+    btn.addEventListener("click", () => toggleBoxStatus(order, Number(btn.dataset.boxIndex)));
+  });
 
   const done = order["出貨狀態"] === "已完成";
   statusBtn.classList.remove("hidden");
-  statusBtn.textContent = done ? "取消完成（改回未處理）" : "標記完成";
+  statusBtn.textContent = done ? "整張訂單取消完成（改回未處理）" : "整張訂單標記完成";
   statusBtn.onclick = () => toggleOrderStatus(order, done);
 
   deleteBtn.classList.remove("hidden");
   deleteBtn.onclick = () => deleteOrder(order);
+}
+
+async function toggleBoxStatus(order, boxIndex) {
+  const boxes = orderBoxes(order);
+  const box = boxes[boxIndex];
+  if (!box) return;
+  const nextDone = !box.done;
+
+  const btn = document.querySelector(`.box-toggle-btn[data-box-index="${boxIndex}"]`);
+  if (btn) btn.disabled = true;
+  try {
+    await apiPost({ action: "updateBoxStatus", orderId: order["訂單ID"], boxIndex, done: nextDone });
+    await refreshOrders();
+    renderOrderDetail();
+  } catch (err) {
+    alert("更新失敗：" + err.message);
+  } finally {
+    if (btn) btn.disabled = false;
+  }
 }
 
 async function toggleOrderStatus(order, currentlyDone) {
