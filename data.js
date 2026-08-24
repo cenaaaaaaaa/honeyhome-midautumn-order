@@ -6,7 +6,7 @@
 
 // 每次更新 assets/img 裡的照片，把這個數字 +1，
 // 網頁就會強迫瀏覽器重新抓最新的圖，不會一直卡舊的快取版本。
-const ASSET_VERSION = 3;
+const ASSET_VERSION = 4;
 function imgV(path) {
   return path ? `${path}?v=${ASSET_VERSION}` : path;
 }
