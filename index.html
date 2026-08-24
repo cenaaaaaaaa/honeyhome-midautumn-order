@@ -39,6 +39,13 @@
         <div class="desc">自己挑口味、湊數量，組出理想禮盒</div>
       </div>
     </button>
+    <button id="btn-gallery" class="big-btn">
+      <span class="icon">📷</span>
+      <div>
+        <div class="label">產品照片</div>
+        <div class="desc">品項、禮盒、組合範例的實拍照片</div>
+      </div>
+    </button>
   </div>
 
   <div class="contact-footer">
@@ -72,6 +79,24 @@
     <h1>固定禮盒</h1>
   </div>
   <p>這款禮盒是整組固定內容，無法線上調整比例，歡迎直接來電或加 LINE 詢問訂購～</p>
+</section>
+
+<!-- ========== 按鈕四：產品照片（選分類） ========== -->
+<section id="screen-gallery-pick" class="screen page hidden">
+  <div class="topbar">
+    <button class="back-btn" data-back>‹</button>
+    <h1>產品照片</h1>
+  </div>
+  <div id="gallery-category-list"></div>
+</section>
+
+<!-- ========== 產品照片：分類詳情 ========== -->
+<section id="screen-gallery-detail" class="screen page hidden">
+  <div class="topbar">
+    <button class="back-btn" data-back>‹</button>
+    <h1 id="gallery-detail-title">照片</h1>
+  </div>
+  <div id="gallery-photo-grid"></div>
 </section>
 
 <!-- ========== 按鈕三：自己組合看看（選禮盒） ========== -->

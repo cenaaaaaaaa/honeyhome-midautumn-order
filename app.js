@@ -80,6 +80,10 @@ function initHome() {
     renderComboBoxPicker();
     goTo("screen-combo-pick");
   });
+  document.getElementById("btn-gallery").addEventListener("click", () => {
+    renderGalleryCategoryList();
+    goTo("screen-gallery-pick");
+  });
 
   document.querySelectorAll("[data-back]").forEach(btn => {
     btn.addEventListener("click", goBack);
@@ -180,6 +184,56 @@ function renderBoxGallery() {
   FIXED_BOXES.forEach(box => {
     renderCard(box, `${box.size}／$${box.price}／整盒固定內容`, "查看聯絡方式", () => goTo("screen-fixed-contact"));
   });
+}
+
+// ---------------- 按鈕四：產品照片 ----------------
+function renderGalleryCategoryList() {
+  const wrap = document.getElementById("gallery-category-list");
+  wrap.innerHTML = "";
+
+  GALLERY_CATEGORIES.forEach(cat => {
+    const el = document.createElement("div");
+    el.className = "gallery-category-card";
+    el.innerHTML = `
+      <span class="icon">${cat.icon}</span>
+      <div>
+        <div class="name">${cat.name}</div>
+        <div class="count">${cat.desc}${cat.photos.length ? `（${cat.photos.length} 張）` : "（照片準備中）"}</div>
+      </div>`;
+    el.addEventListener("click", () => {
+      renderGalleryDetail(cat.id);
+      goTo("screen-gallery-detail");
+    });
+    wrap.appendChild(el);
+  });
+}
+
+function renderGalleryDetail(categoryId) {
+  const cat = GALLERY_CATEGORIES.find(c => c.id === categoryId);
+  if (!cat) return;
+
+  document.getElementById("gallery-detail-title").textContent = cat.name;
+  const wrap = document.getElementById("gallery-photo-grid");
+
+  if (cat.photos.length === 0) {
+    wrap.innerHTML = `
+      <div class="gallery-empty">
+        <span class="emoji">📸</span>
+        照片準備中，敬請期待～
+      </div>`;
+    return;
+  }
+
+  wrap.className = "gallery-grid";
+  wrap.innerHTML = cat.photos
+    .map(
+      p => `
+      <div class="gallery-photo-card">
+        <img src="${imgV(p.img)}" alt="${p.caption}" onerror="this.style.display='none'">
+        <div class="caption">${p.caption}</div>
+      </div>`
+    )
+    .join("");
 }
 
 // ---------------- 按鈕三：自己組合看看 ----------------
