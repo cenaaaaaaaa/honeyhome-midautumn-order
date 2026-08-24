@@ -5,7 +5,7 @@
 // 【出貨系統 API 設定】
 // 完成 apps-script/Code.gs 的部署後，把產生的網頁應用程式網址貼在這裡。
 const FULFILLMENT_API = {
-  url: "", // 例如 https://script.google.com/macros/s/xxxxxxxx/exec
+  url: "https://script.google.com/macros/s/AKfycbwYNyho6dLgQCI4UqPs6h9Hunv8FZszdgkBNgHxNR9Eu-IesBRAuqITaOOmQO4VgAZ_/exec",
 };
 
 // 「現在操作的人」名單，之後隨時可以加人。
