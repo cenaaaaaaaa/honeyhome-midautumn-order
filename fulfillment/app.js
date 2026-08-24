@@ -4,6 +4,7 @@
 
 const state = {
   screenStack: ["screen-password"],
+  menuBaseStack: null, // 成功進到功能選單那一刻的路徑記錄，goToMenuDirect() 靠這個正確回選單
   operator: sessionStorage.getItem("ff_operator") || "",
   orders: [], // 從資料窗口抓回來的所有訂單（快取，已濾掉軟刪除的）
   calendar: (() => { const now = new Date(); return { year: now.getFullYear(), month: now.getMonth() }; })(),
@@ -44,6 +45,14 @@ function backToKoCart() {
     state.screenStack.pop();
   }
   showScreen("screen-key-order");
+}
+
+// 成功進到功能選單那一刻，把當下的路徑記錄存起來當「回功能選單的正確路徑」。
+// 這樣不管是登入後直接到選單、還是先選完操作人才到選單，goToMenuDirect() 都能正確還原，
+// 不用在每個「回選單」的按鈕上各自寫容易漏掉、容易寫錯的重置邏輯。
+function goToMenuDirect() {
+  state.screenStack = state.menuBaseStack ? state.menuBaseStack.slice() : ["screen-password", "screen-menu"];
+  showScreen("screen-menu");
 }
 
 // ---------------- 資料窗口 API ----------------
@@ -123,10 +132,11 @@ function bindPasswordSubmit() {
 
 function afterLogin() {
   if (state.operator) {
-    showScreen("screen-menu");
+    goTo("screen-menu");
+    state.menuBaseStack = state.screenStack.slice();
     initMenuScreen();
   } else {
-    showScreen("screen-operator");
+    goTo("screen-operator");
   }
 }
 
@@ -141,7 +151,8 @@ function initOperatorScreen() {
     btn.addEventListener("click", () => {
       state.operator = name;
       sessionStorage.setItem("ff_operator", name);
-      showScreen("screen-menu");
+      goTo("screen-menu");
+      state.menuBaseStack = state.screenStack.slice();
       initMenuScreen();
     });
     grid.appendChild(btn);
@@ -154,11 +165,13 @@ function initMenuScreen() {
   document.getElementById("btn-switch-operator").onclick = () => {
     state.operator = "";
     sessionStorage.removeItem("ff_operator");
-    showScreen("screen-operator");
+    state.screenStack = ["screen-password"];
+    state.menuBaseStack = null;
+    goTo("screen-operator");
   };
   document.getElementById("btn-key-order").onclick = () => {
     resetKeyOrderFlow();
-    state.screenStack = ["screen-password", "screen-operator", "screen-menu"];
+    goToMenuDirect();
     goTo("screen-key-order");
     renderKoCart();
   };
@@ -595,14 +608,13 @@ function initKoOrderFormScreen() {
 
   document.getElementById("ko-new-order").onclick = () => {
     resetKeyOrderFlow();
-    state.screenStack = ["screen-password", "screen-operator", "screen-menu"];
+    goToMenuDirect();
     goTo("screen-key-order");
     renderKoCart();
   };
   document.getElementById("ko-back-menu").onclick = () => {
     resetKeyOrderFlow();
-    state.screenStack = ["screen-password", "screen-operator", "screen-menu"];
-    showScreen("screen-menu");
+    goToMenuDirect();
   };
 
   document.getElementById("ko-order-form").onsubmit = submitKeyOrder;
@@ -852,10 +864,17 @@ function renderOrderDetail() {
 
   const joinIfAny = (a, b) => (a || b ? `${a || ""}　${b || ""}` : "");
 
-  const lines = (order["品項明細"] && order["品項明細"].lines) || [];
-  const linesHtml = lines.length
-    ? lines.map(l => `<div class="detail-row"><span class="k">${l.productName}｜${l.flavor}</span><span class="v">${l.qty}</span></div>`).join("")
-    : `<div class="detail-row"><span class="k">品項明細</span><span class="v">（無結構化明細，請看備註）</span></div>`;
+  const detail = order["品項明細"] || {};
+  const lines = detail.lines || [];
+  let linesHtml;
+  if (lines.length) {
+    linesHtml = lines.map(l => `<div class="detail-row"><span class="k">${l.productName}｜${l.flavor}</span><span class="v">${l.qty}</span></div>`).join("");
+  } else if (detail.raw) {
+    // 品項解析不出來時，至少把原始訂單內容整段顯示出來，不會讓人完全看不到訂單寫了什麼
+    linesHtml = `<div class="order-recap" style="margin:0;">${String(detail.raw).replace(/\n/g, "<br>")}</div>`;
+  } else {
+    linesHtml = `<div class="detail-row"><span class="k">品項明細</span><span class="v">（沒有明細資料，請看備註）</span></div>`;
+  }
 
   const rows = [
     ["建立人", order["建立人"]],

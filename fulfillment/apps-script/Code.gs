@@ -42,6 +42,7 @@ function doGet(e) {
 
     if (params.action === "orders" || !params.action) {
       syncFormOrders_();
+      backfillMissingLines_();
       const orders = readShipOrders_();
       return jsonOut_({ ok: true, orders });
     }
@@ -278,9 +279,14 @@ function syncFormOrders_() {
     const methodMatch = summaryText.match(/【取貨方式[：:]\s*([^】]+)】/);
     const method = methodMatch ? methodMatch[1] : "";
 
+    // 優先用結構化的 detailJson（如果有設定的話最準），沒有的話直接從「禮盒內容」文字解析，
+    // 這個文字格式是網頁自己固定產生的，解析起來很可靠，不強制要求一定要設定 detailJson 才能用。
     let lines = [];
     if (colDetailJson != null && data[r][colDetailJson]) {
       lines = flattenDetailJson_(data[r][colDetailJson]);
+    }
+    if (!lines.length) {
+      lines = parseSummaryLines_(summaryText);
     }
 
     newRows.push(buildRowByHeaderName_(shipSheet, {
@@ -295,7 +301,7 @@ function syncFormOrders_() {
       "收貨人姓名": colRecipientName != null ? data[r][colRecipientName] : "",
       "收貨人電話": colRecipientPhone != null ? data[r][colRecipientPhone] : "",
       "收貨人地址": colRecipientAddress != null ? data[r][colRecipientAddress] : "",
-      "品項明細JSON": JSON.stringify({ lines, raw: lines.length ? undefined : summaryText }),
+      "品項明細JSON": JSON.stringify({ lines: lines, raw: summaryText }),
       "總金額": colTotal != null ? data[r][colTotal] : "",
       "備註": colNote != null ? data[r][colNote] : "",
       "出貨狀態": "未處理",
@@ -330,6 +336,70 @@ function flattenDetailJson_(raw) {
     return lines;
   } catch (err) {
     return [];
+  }
+}
+
+// 從「禮盒內容」的原始文字直接解析出 {productName, flavor, qty} 清單。
+// 文字格式是訂購網頁自己固定產生的，長得像：
+//   禮盒：蛋黃酥禮盒
+//   份量：15 入
+//   蛋黃酥：綠豆 x10、烏豆沙 x2、芋泥 x3
+//   總金額：$750
+// 只挑「品名：口味 x數量、口味 x數量」這種列來解析，「禮盒/份量/訂購盒數/總金額」這些說明列會跳過。
+function parseSummaryLines_(summaryText) {
+  const lines = [];
+  if (!summaryText) return lines;
+  const skipLabels = ["禮盒", "份量", "訂購盒數", "總金額", "取貨方式"];
+
+  String(summaryText).split("\n").forEach(rawRow => {
+    // 每張訂單的第一個品項行會有「【第 1 項】」這種前綴，先拿掉再判斷
+    const row = rawRow.trim().replace(/^【第\s*\d+\s*項】/, "").trim();
+    const m = row.match(/^([^：]+)：(.+)$/);
+    if (!m) return;
+    const label = m[1].trim();
+    if (skipLabels.some(s => label.indexOf(s) !== -1)) return;
+
+    const productName = label;
+    m[2].split("、").forEach(part => {
+      const fm = part.trim().match(/^(.+?)\s*[x×]\s*(\d+)\s*$/i);
+      if (fm) {
+        lines.push({ productName: productName, flavor: fm[1].trim(), qty: Number(fm[2]) });
+      }
+    });
+  });
+
+  return lines;
+}
+
+// 一次性補救：出貨管理分頁裡，之前同步進來但因為還沒有這個文字解析功能、
+// 品項明細是空的客人訂單，重新用它們身上留著的原始文字（raw）解析一次，
+// 補進正確的品項清單，用 setValue 直接改同一格，不會新增或刪除任何一列/一欄。
+function backfillMissingLines_() {
+  const sheet = getShipSheet_();
+  const range = sheet.getDataRange().getValues();
+  if (range.length < 2) return;
+  const headers = range[0];
+  const detailCol = headers.indexOf("品項明細JSON");
+  const srcCol = headers.indexOf("來源");
+  if (detailCol === -1) return;
+
+  for (let i = 1; i < range.length; i++) {
+    if (range[i][srcCol] !== "customer_form") continue;
+    const raw = range[i][detailCol];
+    if (!raw) continue;
+    let parsed;
+    try {
+      parsed = JSON.parse(raw);
+    } catch (err) {
+      continue;
+    }
+    if (parsed.lines && parsed.lines.length) continue; // 已經有明細，不用補
+    if (!parsed.raw) continue; // 沒有原始文字可以重新解析
+
+    const newLines = parseSummaryLines_(parsed.raw);
+    if (newLines.length) {
+      sheet.getRange(i + 1, detailCol + 1).setValue(JSON.stringify({ lines: newLines, raw: parsed.raw }));
+    }
   }
 }
 
