@@ -10,6 +10,9 @@
  * 這個腳本只會「讀」客人下單的那張表單回應表（不會動它），
  * 另外自己建一張新的分頁「出貨管理」來存出貨系統自己的資料
  * （手動 key 的訂單、出貨狀態、備料彙總都在這張新分頁裡）。
+ *
+ * 之後如果又多了新欄位，這份腳本會自動幫「出貨管理」分頁的表頭補上新欄位
+ * （只會加在最後面，不會動到既有欄位跟資料，符合「只加不刪」的原則）。
  */
 
 // ---------- 設定 ----------
@@ -20,13 +23,14 @@ const SHARED_PASSWORD = "請改成你們自己的密碼";
 // 出貨系統自己使用的分頁名稱，不會跟客人下單那張表衝突。
 const SHIP_SHEET_NAME = "出貨管理";
 
-// 出貨管理分頁的欄位順序（新分頁會自動照這個順序建立表頭）。
+// 出貨管理分頁應該要有的所有欄位。之後要加新欄位，直接加在這個陣列最後面就好，
+// 腳本下次執行時會自動幫既有的分頁補上新表頭，不用手動改試算表。
 const SHIP_HEADERS = [
   "訂單ID", "來源", "來源列號", "建立人", "取貨方式",
   "取貨日期", "寄件日期", "訂貨人姓名", "訂貨人電話",
   "收貨人姓名", "收貨人電話", "收貨人地址",
   "品項明細JSON", "總金額", "備註", "出貨狀態",
-  "建立時間", "完成人", "完成時間",
+  "建立時間", "完成人", "完成時間", "刪除人", "刪除時間",
 ];
 
 // ---------- 入口：GET（讀取訂單清單） ----------
@@ -48,7 +52,7 @@ function doGet(e) {
   }
 }
 
-// ---------- 入口：POST（新增手動訂單 / 更新出貨狀態） ----------
+// ---------- 入口：POST（新增手動訂單 / 更新出貨狀態 / 刪除） ----------
 
 function doPost(e) {
   try {
@@ -62,6 +66,11 @@ function doPost(e) {
 
     if (body.action === "updateStatus") {
       updateStatus_(body.orderId, body.status, body.operator);
+      return jsonOut_({ ok: true });
+    }
+
+    if (body.action === "deleteOrder") {
+      deleteOrder_(body.orderId, body.operator);
       return jsonOut_({ ok: true });
     }
 
@@ -79,7 +88,7 @@ function checkPassword(pwd) {
   }
 }
 
-// ---------- 出貨管理分頁：讀取 / 新增 / 更新 ----------
+// ---------- 出貨管理分頁：取得 / 表頭自動補齊 ----------
 
 function getShipSheet_() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -88,18 +97,52 @@ function getShipSheet_() {
     sheet = ss.insertSheet(SHIP_SHEET_NAME);
     sheet.appendRow(SHIP_HEADERS);
     sheet.setFrozenRows(1);
+  } else {
+    ensureShipHeaders_(sheet);
   }
   return sheet;
 }
+
+// 檢查分頁目前的表頭，缺什麼就補在最後一欄，不動既有欄位順序跟資料。
+function ensureShipHeaders_(sheet) {
+  const lastCol = Math.max(sheet.getLastColumn(), 1);
+  const currentHeaders = sheet.getRange(1, 1, 1, lastCol).getValues()[0].map(String);
+  const missing = SHIP_HEADERS.filter(h => currentHeaders.indexOf(h) === -1);
+  missing.forEach((h, i) => {
+    sheet.getRange(1, lastCol + 1 + i).setValue(h);
+  });
+}
+
+function getShipHeaderIndex_(sheet) {
+  const lastCol = Math.max(sheet.getLastColumn(), 1);
+  const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+  const idx = {};
+  headers.forEach((h, i) => { idx[h] = i; }); // 0-based
+  return idx;
+}
+
+// 依表頭名稱把一筆資料組成正確順序的列，缺的欄位留空字串。
+function buildRowByHeaderName_(sheet, valuesByHeader) {
+  const idx = getShipHeaderIndex_(sheet);
+  const lastCol = Math.max(sheet.getLastColumn(), 1);
+  const row = new Array(lastCol).fill("");
+  Object.keys(valuesByHeader).forEach(h => {
+    if (h in idx) row[idx[h]] = valuesByHeader[h];
+  });
+  return row;
+}
+
+// ---------- 出貨管理分頁：讀取 / 新增 / 更新 / 刪除 ----------
 
 function readShipOrders_() {
   const sheet = getShipSheet_();
   const range = sheet.getDataRange().getValues();
   if (range.length < 2) return [];
   const headers = range[0];
+  const idCol = headers.indexOf("訂單ID");
   const rows = range.slice(1);
   return rows
-    .filter(row => row[0]) // 訂單ID 有值才算一筆
+    .filter(row => row[idCol]) // 訂單ID 有值才算一筆
     .map(row => {
       const obj = {};
       headers.forEach((h, i) => { obj[h] = row[i]; });
@@ -107,6 +150,7 @@ function readShipOrders_() {
       obj["寄件日期"] = formatDate_(obj["寄件日期"]);
       obj["建立時間"] = formatDateTime_(obj["建立時間"]);
       obj["完成時間"] = formatDateTime_(obj["完成時間"]);
+      obj["刪除時間"] = formatDateTime_(obj["刪除時間"]);
       try {
         obj["品項明細"] = obj["品項明細JSON"] ? JSON.parse(obj["品項明細JSON"]) : { lines: [] };
       } catch (err) {
@@ -122,56 +166,71 @@ function addManualOrder_(order) {
   const now = new Date();
   const lines = Array.isArray(order.lines) ? order.lines : [];
 
-  sheet.appendRow([
-    id,
-    "manual",
-    "",
-    order.operator || "",
-    order.method || "",
-    order.pickupDate || "",
-    order.mailDate || "",
-    order.customerName || "",
-    order.customerPhone || "",
-    order.recipientName || "",
-    order.recipientPhone || "",
-    order.recipientAddress || "",
-    JSON.stringify({ lines }),
-    order.total || "",
-    order.note || "",
-    "未處理",
-    now,
-    "",
-    "",
-  ]);
+  const row = buildRowByHeaderName_(sheet, {
+    "訂單ID": id,
+    "來源": "manual",
+    "建立人": order.operator || "",
+    "取貨方式": order.method || "",
+    "取貨日期": order.pickupDate || "",
+    "寄件日期": order.mailDate || "",
+    "訂貨人姓名": order.customerName || "",
+    "訂貨人電話": order.customerPhone || "",
+    "收貨人姓名": order.recipientName || "",
+    "收貨人電話": order.recipientPhone || "",
+    "收貨人地址": order.recipientAddress || "",
+    "品項明細JSON": JSON.stringify({ lines }),
+    "總金額": order.total || "",
+    "備註": order.note || "",
+    "出貨狀態": "未處理",
+    "建立時間": now,
+  });
+  sheet.appendRow(row);
 
   return { id };
 }
 
-function updateStatus_(orderId, status, operator) {
+function findShipRow_(sheet, orderId) {
   if (!orderId) throw new Error("缺少 orderId");
-  const sheet = getShipSheet_();
   const range = sheet.getDataRange().getValues();
   const headers = range[0];
   const idCol = headers.indexOf("訂單ID");
+  for (let i = 1; i < range.length; i++) {
+    if (range[i][idCol] === orderId) {
+      return { rowNum: i + 1, headers };
+    }
+  }
+  throw new Error("找不到這筆訂單：" + orderId);
+}
+
+function updateStatus_(orderId, status, operator) {
+  const sheet = getShipSheet_();
+  const { rowNum, headers } = findShipRow_(sheet, orderId);
   const statusCol = headers.indexOf("出貨狀態");
   const doneByCol = headers.indexOf("完成人");
   const doneAtCol = headers.indexOf("完成時間");
 
-  for (let i = 1; i < range.length; i++) {
-    if (range[i][idCol] === orderId) {
-      const rowNum = i + 1;
-      sheet.getRange(rowNum, statusCol + 1).setValue(status);
-      if (status === "已完成") {
-        sheet.getRange(rowNum, doneByCol + 1).setValue(operator || "");
-        sheet.getRange(rowNum, doneAtCol + 1).setValue(new Date());
-      } else {
-        sheet.getRange(rowNum, doneByCol + 1).setValue("");
-        sheet.getRange(rowNum, doneAtCol + 1).setValue("");
-      }
-      return;
-    }
+  sheet.getRange(rowNum, statusCol + 1).setValue(status);
+  if (status === "已完成") {
+    sheet.getRange(rowNum, doneByCol + 1).setValue(operator || "");
+    sheet.getRange(rowNum, doneAtCol + 1).setValue(new Date());
+  } else {
+    sheet.getRange(rowNum, doneByCol + 1).setValue("");
+    sheet.getRange(rowNum, doneAtCol + 1).setValue("");
   }
-  throw new Error("找不到這筆訂單：" + orderId);
+}
+
+// 「刪除」用的是軟刪除：只是把出貨狀態改成「已刪除」，資料本身還留在表格裡，
+// 不會真的清掉那一列，符合「只加不刪」的原則，之後真的需要都還能從表格救回來。
+function deleteOrder_(orderId, operator) {
+  const sheet = getShipSheet_();
+  const { rowNum, headers } = findShipRow_(sheet, orderId);
+  const statusCol = headers.indexOf("出貨狀態");
+  const delByCol = headers.indexOf("刪除人");
+  const delAtCol = headers.indexOf("刪除時間");
+
+  sheet.getRange(rowNum, statusCol + 1).setValue("已刪除");
+  sheet.getRange(rowNum, delByCol + 1).setValue(operator || "");
+  sheet.getRange(rowNum, delAtCol + 1).setValue(new Date());
 }
 
 // ---------- 同步：把客人網頁下的新訂單，從表單回應表搬一份進出貨管理 ----------
@@ -224,31 +283,29 @@ function syncFormOrders_() {
       lines = flattenDetailJson_(data[r][colDetailJson]);
     }
 
-    newRows.push([
-      Utilities.getUuid(),
-      "customer_form",
-      formRowNum,
-      "客人網頁下單",
-      method,
-      formatDate_(colDate != null ? data[r][colDate] : ""),
-      "",
-      colName != null ? data[r][colName] : "",
-      colPhone != null ? data[r][colPhone] : "",
-      colRecipientName != null ? data[r][colRecipientName] : "",
-      colRecipientPhone != null ? data[r][colRecipientPhone] : "",
-      colRecipientAddress != null ? data[r][colRecipientAddress] : "",
-      JSON.stringify({ lines, raw: lines.length ? undefined : summaryText }),
-      colTotal != null ? data[r][colTotal] : "",
-      colNote != null ? data[r][colNote] : "",
-      "未處理",
-      new Date(),
-      "",
-      "",
-    ]);
+    newRows.push(buildRowByHeaderName_(shipSheet, {
+      "訂單ID": Utilities.getUuid(),
+      "來源": "customer_form",
+      "來源列號": formRowNum,
+      "建立人": "客人網頁下單",
+      "取貨方式": method,
+      "取貨日期": formatDate_(colDate != null ? data[r][colDate] : ""),
+      "訂貨人姓名": colName != null ? data[r][colName] : "",
+      "訂貨人電話": colPhone != null ? data[r][colPhone] : "",
+      "收貨人姓名": colRecipientName != null ? data[r][colRecipientName] : "",
+      "收貨人電話": colRecipientPhone != null ? data[r][colRecipientPhone] : "",
+      "收貨人地址": colRecipientAddress != null ? data[r][colRecipientAddress] : "",
+      "品項明細JSON": JSON.stringify({ lines, raw: lines.length ? undefined : summaryText }),
+      "總金額": colTotal != null ? data[r][colTotal] : "",
+      "備註": colNote != null ? data[r][colNote] : "",
+      "出貨狀態": "未處理",
+      "建立時間": new Date(),
+    }));
   }
 
   if (newRows.length) {
-    shipSheet.getRange(shipSheet.getLastRow() + 1, 1, newRows.length, SHIP_HEADERS.length).setValues(newRows);
+    const lastCol = Math.max(shipSheet.getLastColumn(), 1);
+    shipSheet.getRange(shipSheet.getLastRow() + 1, 1, newRows.length, lastCol).setValues(newRows);
   }
 }
 

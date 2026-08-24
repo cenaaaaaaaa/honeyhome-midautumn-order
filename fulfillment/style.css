@@ -1,5 +1,10 @@
 /* 出貨系統專用樣式，疊加在訂購網頁的 style.css 上面 */
 
+.danger-btn {
+  border-color: #b0132f;
+  color: #b0132f;
+}
+
 .operator-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;

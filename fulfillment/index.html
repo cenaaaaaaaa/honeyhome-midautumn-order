@@ -66,14 +66,65 @@
   </div>
 </section>
 
-<!-- ========== key 訂單 ========== -->
+<!-- ========== key 訂單：品項清單（購物車） ========== -->
 <section id="screen-key-order" class="screen page hidden">
   <div class="topbar">
     <button class="back-btn" data-back>‹</button>
     <h1>key 訂單</h1>
   </div>
+  <p style="color:var(--ink-soft);font-size:14px;">建立人：<strong id="ko-cart-operator" style="color:var(--maroon);"></strong></p>
+  <div id="ko-cart-list"></div>
+  <button id="ko-add-box" class="ghost-btn" style="width:100%;margin:6px 0 18px;">＋ 新增一個禮盒品項</button>
 
-  <form id="key-order-form">
+  <div class="combo-summary">
+    <div id="ko-cart-total" class="total">目前總金額：$0</div>
+    <button id="ko-goto-order-form" class="solid-btn" disabled>填寫訂購資訊，送出訂單</button>
+  </div>
+</section>
+
+<!-- ========== key 訂單：選禮盒樣式 ========== -->
+<section id="screen-ko-box-pick" class="screen page hidden">
+  <div class="topbar">
+    <button class="back-btn" data-back>‹</button>
+    <h1>選禮盒樣式</h1>
+  </div>
+  <div id="ko-box-grid" class="box-select-grid"></div>
+</section>
+
+<!-- ========== key 訂單：填禮盒內容 ========== -->
+<section id="screen-ko-box-detail" class="screen page hidden">
+  <div class="topbar">
+    <button class="back-btn" data-back>‹</button>
+    <h1 id="ko-box-detail-title">禮盒內容</h1>
+  </div>
+  <div id="ko-box-detail-body"></div>
+
+  <div class="flavor-row" id="ko-box-qty-row">
+    <span class="fname">這個規格訂購幾盒</span>
+    <div class="qty-control">
+      <button class="qty-btn" id="ko-box-qty-dec">−</button>
+      <input class="qty-num-input" type="number" inputmode="numeric" min="1" step="1" value="1" id="ko-box-qty-input">
+      <button class="qty-btn" id="ko-box-qty-inc">＋</button>
+    </div>
+  </div>
+
+  <div id="ko-box-summary" class="combo-summary">
+    <div id="ko-box-remain" class="remain"></div>
+    <div id="ko-box-total" class="total">總金額：$0</div>
+    <button id="ko-box-add-btn" class="solid-btn" disabled>加入品項清單</button>
+  </div>
+</section>
+
+<!-- ========== key 訂單：訂購資訊 ========== -->
+<section id="screen-ko-order-form" class="screen page hidden">
+  <div class="topbar">
+    <button class="back-btn" data-back>‹</button>
+    <h1>填寫訂購資訊</h1>
+  </div>
+
+  <div class="order-recap" id="ko-order-recap"></div>
+
+  <form id="ko-order-form">
     <div class="field">
       <label>建立人</label>
       <input type="text" id="ko-operator" disabled />
@@ -112,17 +163,13 @@
       <input type="text" id="ko-address" />
     </div>
 
-    <div class="section-title">品項明細</div>
-    <div id="ko-lines"></div>
-    <button type="button" id="ko-add-line" class="ghost-btn" style="width:100%;margin:8px 0 18px;">＋ 新增一項品項</button>
-
     <div class="field">
       <label>總金額</label>
       <input type="number" id="ko-total" inputmode="numeric" min="0" step="1" />
     </div>
     <div class="field">
-      <label>備註</label>
-      <textarea id="ko-note"></textarea>
+      <label>備註（電話/手寫單的單號也記在這裡）</label>
+      <textarea id="ko-note" placeholder="例如：手寫單號 #23、客人特別要求..."></textarea>
     </div>
 
     <button type="submit" class="solid-btn">送出訂單</button>
@@ -135,16 +182,6 @@
     <button id="ko-back-menu" class="solid-btn" style="margin-top:10px;">回功能選單</button>
   </div>
 </section>
-
-<!-- ========== 品項列模板（JS 會複製這個區塊） ========== -->
-<template id="ko-line-template">
-  <div class="ko-line flavor-row" style="flex-wrap:wrap;">
-    <select class="ko-line-product"></select>
-    <select class="ko-line-flavor"></select>
-    <input type="number" class="ko-line-qty" min="1" step="1" value="1" />
-    <button type="button" class="ko-line-remove qty-btn">×</button>
-  </div>
-</template>
 
 <!-- ========== 查看每日訂單（日曆） ========== -->
 <section id="screen-daily" class="screen page hidden">
@@ -187,6 +224,7 @@
   </div>
   <div id="order-detail-body"></div>
   <button id="order-toggle-status" class="solid-btn" style="margin-top:16px;">標記完成</button>
+  <button id="order-delete" class="ghost-btn danger-btn" style="width:100%;margin-top:10px;">刪除這張訂單</button>
 </section>
 
 <!-- ========== 出貨（找訂單入口，直接沿用查看每日訂單） ========== -->

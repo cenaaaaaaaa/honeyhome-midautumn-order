@@ -5,10 +5,14 @@
 const state = {
   screenStack: ["screen-password"],
   operator: sessionStorage.getItem("ff_operator") || "",
-  orders: [], // 從資料窗口抓回來的所有訂單（快取）
+  orders: [], // 從資料窗口抓回來的所有訂單（快取，已濾掉軟刪除的）
   calendar: (() => { const now = new Date(); return { year: now.getFullYear(), month: now.getMonth() }; })(),
   viewMode: "calendar", // calendar | list
   currentDetailId: null,
+  // key 訂單用：目前正在挑選中的禮盒（跟訂購網頁「自己組合看看」邏輯一樣）
+  koCombo: { boxId: null, size: null, boxQty: 1, qty: {} },
+  // key 訂單用：這張訂單目前已經加入的禮盒品項清單
+  koCart: [],
 };
 
 // ---------------- 畫面切換 ----------------
@@ -31,6 +35,15 @@ function goBack() {
   } else {
     showScreen("screen-menu");
   }
+}
+
+// 從「選禮盒樣式」或「填禮盒內容」畫面（不管疊了幾層）直接跳回「品項清單」畫面，
+// 不管當下巢狀了幾層都能一次跳回去，比 goBack() 只退一步更可靠。
+function backToKoCart() {
+  while (state.screenStack.length > 1 && state.screenStack[state.screenStack.length - 1] !== "screen-key-order") {
+    state.screenStack.pop();
+  }
+  showScreen("screen-key-order");
 }
 
 // ---------------- 資料窗口 API ----------------
@@ -61,7 +74,8 @@ async function apiPost(payload) {
 
 async function refreshOrders() {
   const data = await apiGet("orders");
-  state.orders = data.orders || [];
+  // 軟刪除的訂單（出貨狀態＝已刪除）不放進畫面上任何清單/彙總
+  state.orders = (data.orders || []).filter(o => o["出貨狀態"] !== "已刪除");
   return state.orders;
 }
 
@@ -69,7 +83,6 @@ async function refreshOrders() {
 function initPasswordScreen() {
   const saved = getPwd();
   if (saved) {
-    // 之前輸入過密碼，直接試著抓一次資料確認密碼還有效
     tryEnterWithSavedPassword();
     return;
   }
@@ -144,8 +157,10 @@ function initMenuScreen() {
     showScreen("screen-operator");
   };
   document.getElementById("btn-key-order").onclick = () => {
-    initKeyOrderScreen();
+    resetKeyOrderFlow();
+    state.screenStack = ["screen-password", "screen-operator", "screen-menu"];
     goTo("screen-key-order");
+    renderKoCart();
   };
   document.getElementById("btn-daily").onclick = async () => {
     goTo("screen-daily");
@@ -157,43 +172,411 @@ function initMenuScreen() {
   };
 }
 
-// ---------------- key 訂單 ----------------
-function makeLineRow() {
-  const tpl = document.getElementById("ko-line-template");
-  const node = tpl.content.firstElementChild.cloneNode(true);
-  const productSelect = node.querySelector(".ko-line-product");
-  const flavorSelect = node.querySelector(".ko-line-flavor");
+// ============================================================
+// key 訂單 - Part 1：品項清單（購物車）
+// ============================================================
 
-  FF_PRODUCTS.forEach(p => {
-    const opt = document.createElement("option");
-    opt.value = p.key;
-    opt.textContent = p.name;
-    productSelect.appendChild(opt);
-  });
-
-  const fillFlavors = () => {
-    const product = FF_PRODUCTS.find(p => p.key === productSelect.value);
-    flavorSelect.innerHTML = "";
-    (product ? product.flavors : []).forEach(f => {
-      const opt = document.createElement("option");
-      opt.value = f;
-      opt.textContent = f;
-      flavorSelect.appendChild(opt);
-    });
-  };
-  productSelect.addEventListener("change", fillFlavors);
-  fillFlavors();
-
-  node.querySelector(".ko-line-remove").addEventListener("click", () => node.remove());
-  return node;
+function resetKeyOrderFlow() {
+  state.koCart = [];
+  state.koCombo = { boxId: null, size: null, boxQty: 1, qty: {} };
 }
 
-function initKeyOrderScreen() {
+function renderKoCart() {
+  document.getElementById("ko-cart-operator").textContent = state.operator;
+  const wrap = document.getElementById("ko-cart-list");
+  wrap.innerHTML = "";
+
+  if (state.koCart.length === 0) {
+    wrap.innerHTML = `<p style="color:var(--ink-soft);font-size:14px;">目前還沒有加入任何禮盒品項，先點下面「新增一個禮盒品項」。</p>`;
+  }
+
+  state.koCart.forEach((item, idx) => {
+    const el = document.createElement("div");
+    el.className = "order-recap";
+    el.style.position = "relative";
+    el.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+        <strong style="color:var(--maroon);">第 ${idx + 1} 項</strong>
+        <button class="ghost-btn" data-remove="${idx}" style="padding:4px 12px;font-size:12px;">移除</button>
+      </div>
+      ${item.summary.replace(/\n/g, "<br>")}
+    `;
+    wrap.appendChild(el);
+  });
+
+  wrap.querySelectorAll("[data-remove]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      state.koCart.splice(Number(btn.dataset.remove), 1);
+      renderKoCart();
+    });
+  });
+
+  const total = state.koCart.reduce((sum, i) => sum + i.total, 0);
+  document.getElementById("ko-cart-total").textContent = `目前總金額：$${total}`;
+  document.getElementById("ko-goto-order-form").disabled = state.koCart.length === 0;
+}
+
+function initKeyOrderCartScreen() {
+  document.getElementById("ko-add-box").onclick = () => {
+    renderKoBoxGrid();
+    goTo("screen-ko-box-pick");
+  };
+  document.getElementById("ko-goto-order-form").onclick = () => {
+    initKoOrderFormScreen();
+    goTo("screen-ko-order-form");
+  };
+}
+
+// ============================================================
+// key 訂單 - Part 2：選禮盒樣式
+// ============================================================
+
+function allKoBoxes() {
+  return [...FIXED_BOXES.map(b => ({ ...b, type: "fixed" })), ...COMBOABLE_BOXES];
+}
+
+function findKoBox(boxId) {
+  return allKoBoxes().find(b => b.id === boxId);
+}
+
+function renderKoBoxGrid() {
+  const grid = document.getElementById("ko-box-grid");
+  grid.innerHTML = "";
+  allKoBoxes().forEach(box => {
+    const card = document.createElement("div");
+    card.className = "box-select-card";
+    card.innerHTML = `
+      ${box.img ? `<img src="${box.img}" alt="" style="width:100%;height:70px;object-fit:contain" onerror="this.style.display='none'">` : ""}
+      <div class="name">${box.name}</div>
+    `;
+    card.addEventListener("click", () => startKoBox(box.id));
+    grid.appendChild(card);
+  });
+}
+
+function startKoBox(boxId) {
+  const box = findKoBox(boxId);
+  if (!box) return;
+
+  state.koCombo.boxId = boxId;
+  state.koCombo.size = box.sizes ? box.sizes[0] : null;
+  state.koCombo.boxQty = 1;
+  state.koCombo.qty = {};
+
+  if (box.type === "fixed") {
+    // 固定禮盒沒有品項可以調，不用建立 qty 物件
+  } else if (box.type === "single") {
+    state.koCombo.qty[box.productKey] = {};
+  } else if (box.type === "mixFree") {
+    box.productKeys.forEach(k => (state.koCombo.qty[k] = {}));
+  } else if (box.type === "mixFixed") {
+    box.parts.forEach(p => (state.koCombo.qty[p.productKey] = {}));
+  }
+
+  renderKoBoxDetail();
+  goTo("screen-ko-box-detail");
+}
+
+// ============================================================
+// key 訂單 - Part 3：填禮盒內容（口味/數量），邏輯跟訂購網頁的組合工具一致
+// ============================================================
+
+function koComboTargetForPart(box, productKey) {
+  if (box.type === "single") return state.koCombo.size;
+  if (box.type === "mixFree") return null;
+  if (box.type === "mixFixed") {
+    const part = box.parts.find(p => p.productKey === productKey);
+    return part ? part.qty : 0;
+  }
+  return 0;
+}
+
+function sumQty(qtyObj) {
+  return Object.values(qtyObj || {}).reduce((a, b) => a + b, 0);
+}
+
+function koComboOverallTarget(box) {
+  if (box.type === "single") return state.koCombo.size;
+  if (box.type === "mixFree") return state.koCombo.size;
+  if (box.type === "mixFixed") return box.parts.reduce((a, p) => a + p.qty, 0);
+  return 0;
+}
+
+function koComboOverallSelected(box) {
+  let sum = 0;
+  Object.values(state.koCombo.qty).forEach(qtyObj => { sum += sumQty(qtyObj); });
+  return sum;
+}
+
+function koComboTotalPrice(box) {
+  if (box.type === "fixed") return box.price;
+  let total = 0;
+  const keys = box.type === "single" ? [box.productKey] : box.type === "mixFree" ? box.productKeys : box.parts.map(p => p.productKey);
+  keys.forEach(k => {
+    const product = PRODUCTS[k];
+    if (!product) return;
+    const qtyObj = state.koCombo.qty[k] || {};
+    total += sumQty(qtyObj) * product.price;
+  });
+  return total;
+}
+
+function koMaxAllowedForFlavor(box, productKey, flavor) {
+  const qtyObj = state.koCombo.qty[productKey];
+  const current = qtyObj[flavor] || 0;
+  if (box.type === "mixFixed") {
+    const partTarget = koComboTargetForPart(box, productKey);
+    const partSumOthers = sumQty(qtyObj) - current;
+    return Math.max(0, partTarget - partSumOthers);
+  }
+  const overallTarget = koComboOverallTarget(box);
+  const overallSumOthers = koComboOverallSelected(box) - current;
+  return Math.max(0, overallTarget - overallSumOthers);
+}
+
+function koSetQty(productKey, flavor, rawValue, box) {
+  const max = koMaxAllowedForFlavor(box, productKey, flavor);
+  let val = parseInt(rawValue, 10);
+  if (isNaN(val) || val < 0) val = 0;
+  if (val > max) val = max;
+  state.koCombo.qty[productKey][flavor] = val;
+  return val;
+}
+
+function koBumpQty(productKey, flavor, delta, box) {
+  const current = state.koCombo.qty[productKey][flavor] || 0;
+  const next = koSetQty(productKey, flavor, current + delta, box);
+  const input = document.querySelector(`#ko-box-detail-body .qty-num-input[data-key="${productKey}"][data-flavor="${flavor}"]`);
+  if (input) input.value = next;
+  updateKoBoxSummary(box);
+}
+
+function koHandleQtyInput(e) {
+  const box = findKoBox(state.koCombo.boxId);
+  if (!box) return;
+  const { key, flavor } = e.target.dataset;
+  const raw = e.target.value;
+  const clamped = koSetQty(key, flavor, raw, box);
+  if (raw !== "" && String(clamped) !== raw) e.target.value = clamped;
+  updateKoBoxSummary(box);
+}
+
+function koHandleQtyBlur(e) {
+  if (e.target.value === "") e.target.value = "0";
+}
+
+function koSetBoxQty(rawValue) {
+  let val = parseInt(rawValue, 10);
+  if (isNaN(val) || val < 1) val = 1;
+  if (val > 99) val = 99;
+  state.koCombo.boxQty = val;
+  return val;
+}
+
+function koBumpBoxQty(delta) {
+  const next = koSetBoxQty(state.koCombo.boxQty + delta);
+  document.getElementById("ko-box-qty-input").value = next;
+  const box = findKoBox(state.koCombo.boxId);
+  if (box) updateKoBoxSummary(box);
+}
+
+function renderKoBoxDetail() {
+  const box = findKoBox(state.koCombo.boxId);
+  if (!box) return;
+
+  document.getElementById("ko-box-detail-title").textContent = box.name;
+  const body = document.getElementById("ko-box-detail-body");
+
+  if (box.type === "fixed") {
+    body.innerHTML = `<div class="alert-note" style="background:#fff2ea;border-color:var(--gold);color:var(--ink);">${box.name}　${box.size}　整盒固定內容，無法調整口味比例。</div>`;
+    document.getElementById("ko-box-qty-row").classList.remove("hidden");
+    document.getElementById("ko-box-qty-input").value = state.koCombo.boxQty;
+    updateKoBoxSummary(box);
+    return;
+  }
+
+  let html = "";
+  if (box.sizes) {
+    html += `<div class="size-chip-row">`;
+    box.sizes.forEach(sz => {
+      const active = state.koCombo.size === sz ? "active" : "";
+      html += `<button class="size-chip ${active}" data-size="${sz}">${sz} 入</button>`;
+    });
+    html += `</div>`;
+  }
+
+  const renderPartFlavors = (productKey, partLabel) => {
+    const product = PRODUCTS[productKey];
+    if (!product) return "";
+    let out = `<div class="combo-part-title">${partLabel || product.name}</div>`;
+    const qtyObj = state.koCombo.qty[productKey];
+    product.flavors.forEach(flavor => {
+      const q = qtyObj[flavor] || 0;
+      out += `
+        <div class="flavor-row">
+          <span class="fname">${flavor}</span>
+          <div class="qty-control">
+            <button class="qty-btn" data-action="dec" data-key="${productKey}" data-flavor="${flavor}">−</button>
+            <input class="qty-num-input" type="number" inputmode="numeric" min="0" step="1"
+                   value="${q}" data-key="${productKey}" data-flavor="${flavor}">
+            <button class="qty-btn" data-action="inc" data-key="${productKey}" data-flavor="${flavor}">＋</button>
+          </div>
+        </div>`;
+    });
+    return out;
+  };
+
+  if (box.type === "single") {
+    html += renderPartFlavors(box.productKey);
+  } else if (box.type === "mixFree") {
+    box.productKeys.forEach(k => { html += renderPartFlavors(k); });
+  } else if (box.type === "mixFixed") {
+    box.parts.forEach(p => { html += renderPartFlavors(p.productKey, `${PRODUCTS[p.productKey].name}（限 ${p.qty} 入）`); });
+  }
+
+  body.innerHTML = html;
+
+  document.querySelectorAll("#ko-box-detail-body .size-chip").forEach(chip => {
+    chip.addEventListener("click", () => {
+      state.koCombo.size = Number(chip.dataset.size);
+      Object.keys(state.koCombo.qty).forEach(k => (state.koCombo.qty[k] = {}));
+      renderKoBoxDetail();
+    });
+  });
+
+  document.querySelectorAll("#ko-box-detail-body .qty-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const delta = btn.dataset.action === "inc" ? 1 : -1;
+      koBumpQty(btn.dataset.key, btn.dataset.flavor, delta, box);
+    });
+  });
+
+  document.querySelectorAll("#ko-box-detail-body .qty-num-input").forEach(input => {
+    input.addEventListener("input", koHandleQtyInput);
+    input.addEventListener("blur", koHandleQtyBlur);
+    input.addEventListener("focus", () => input.select());
+  });
+
+  document.getElementById("ko-box-qty-row").classList.remove("hidden");
+  document.getElementById("ko-box-qty-input").value = state.koCombo.boxQty;
+  updateKoBoxSummary(box);
+}
+
+function updateKoBoxSummary(box) {
+  const remainEl = document.getElementById("ko-box-remain");
+  const addBtn = document.getElementById("ko-box-add-btn");
+
+  if (box.type === "fixed") {
+    remainEl.textContent = "";
+    document.getElementById("ko-box-total").textContent = `總金額：$${koComboTotalPrice(box) * state.koCombo.boxQty}`;
+    addBtn.disabled = false;
+    return;
+  }
+
+  const target = koComboOverallTarget(box);
+  const selected = koComboOverallSelected(box);
+  const remain = target != null ? target - selected : 0;
+  const perBoxTotal = koComboTotalPrice(box);
+  const boxQty = state.koCombo.boxQty;
+
+  if (target == null) {
+    remainEl.textContent = "";
+  } else if (remain > 0) {
+    remainEl.textContent = `還差 ${remain} 顆才能湊滿 ${target} 入`;
+    remainEl.className = "remain";
+  } else if (remain < 0) {
+    remainEl.textContent = `已超過 ${-remain} 顆，請減少數量`;
+    remainEl.className = "remain";
+  } else {
+    remainEl.textContent = `已湊滿 ${target} 入 ✓`;
+    remainEl.className = "remain ok";
+  }
+
+  document.getElementById("ko-box-total").textContent =
+    boxQty > 1 ? `總金額：$${perBoxTotal * boxQty}（每盒 $${perBoxTotal} × ${boxQty} 盒）` : `總金額：$${perBoxTotal}`;
+
+  addBtn.disabled = !(target != null && remain === 0 && perBoxTotal > 0);
+}
+
+function koComboStructured(box) {
+  if (box.type === "fixed") return [{ productName: box.name, flavor: box.size || "整盒固定內容", qty: 1 }];
+  const keys = box.type === "single" ? [box.productKey] : box.type === "mixFree" ? box.productKeys : box.parts.map(p => p.productKey);
+  return keys.flatMap(k => {
+    const qtyObj = state.koCombo.qty[k] || {};
+    return Object.entries(qtyObj)
+      .filter(([, q]) => q > 0)
+      .map(([flavor, qty]) => ({ productName: PRODUCTS[k].name, flavor, qty }));
+  });
+}
+
+function koComboSummaryText(box) {
+  const boxQty = state.koCombo.boxQty;
+  const perBoxTotal = koComboTotalPrice(box);
+  let lines = [`禮盒：${box.name}`];
+  if (box.type !== "fixed" && state.koCombo.size) lines.push(`份量：${state.koCombo.size} 入`);
+  if (boxQty > 1) lines.push(`訂購盒數：${boxQty} 盒`);
+
+  koComboStructured(box).forEach(item => {
+    lines.push(`${item.productName}：${item.flavor} x${item.qty}`);
+  });
+
+  lines.push(boxQty > 1 ? `總金額：$${perBoxTotal * boxQty}（每盒 $${perBoxTotal} × ${boxQty} 盒）` : `總金額：$${perBoxTotal}`);
+  return lines.join("\n");
+}
+
+function initKoBoxDetailScreen() {
+  document.getElementById("ko-box-qty-dec").onclick = () => koBumpBoxQty(-1);
+  document.getElementById("ko-box-qty-inc").onclick = () => koBumpBoxQty(1);
+  document.getElementById("ko-box-qty-input").oninput = (e) => {
+    const box = findKoBox(state.koCombo.boxId);
+    koSetBoxQty(e.target.value);
+    if (box) updateKoBoxSummary(box);
+  };
+  document.getElementById("ko-box-qty-input").onblur = (e) => {
+    if (e.target.value === "") {
+      e.target.value = koSetBoxQty(1);
+      const box = findKoBox(state.koCombo.boxId);
+      if (box) updateKoBoxSummary(box);
+    }
+  };
+  document.getElementById("ko-box-add-btn").onclick = () => {
+    const box = findKoBox(state.koCombo.boxId);
+    if (!box) return;
+    const boxQty = box.type === "fixed" ? state.koCombo.boxQty : state.koCombo.boxQty;
+    state.koCart.push({
+      boxName: box.name,
+      boxId: box.id,
+      size: box.type === "fixed" ? null : state.koCombo.size,
+      boxQty,
+      summary: koComboSummaryText(box),
+      lines: koComboStructured(box).map(item => ({ ...item, qty: item.qty * boxQty })),
+      total: koComboTotalPrice(box) * boxQty,
+    });
+    backToKoCart();
+    renderKoCart();
+  };
+}
+
+// ============================================================
+// key 訂單 - Part 4：填訂購資訊、送出
+// ============================================================
+
+function getSelectedMethod() {
+  const active = document.querySelector("#ko-method-row .size-chip.active");
+  return active ? active.dataset.method : PICKUP_METHODS[0];
+}
+
+function initKoOrderFormScreen() {
   document.getElementById("ko-operator").value = state.operator;
   document.getElementById("ko-result").classList.add("hidden");
-  document.getElementById("key-order-form").classList.remove("hidden");
-  document.getElementById("key-order-form").reset();
+  document.getElementById("ko-order-form").classList.remove("hidden");
+  document.getElementById("ko-order-form").reset();
   document.getElementById("ko-operator").value = state.operator;
+
+  const recap = state.koCart.map((item, idx) => `【第 ${idx + 1} 項】\n${item.summary}`).join("\n\n");
+  const cartTotal = state.koCart.reduce((sum, i) => sum + i.total, 0);
+  document.getElementById("ko-order-recap").textContent = `${recap}\n\n目前總金額：$${cartTotal}`;
+  document.getElementById("ko-total").value = cartTotal;
 
   const methodRow = document.getElementById("ko-method-row");
   methodRow.innerHTML = "";
@@ -210,35 +593,29 @@ function initKeyOrderScreen() {
     methodRow.appendChild(btn);
   });
 
-  const linesWrap = document.getElementById("ko-lines");
-  linesWrap.innerHTML = "";
-  linesWrap.appendChild(makeLineRow());
+  document.getElementById("ko-new-order").onclick = () => {
+    resetKeyOrderFlow();
+    state.screenStack = ["screen-password", "screen-operator", "screen-menu"];
+    goTo("screen-key-order");
+    renderKoCart();
+  };
+  document.getElementById("ko-back-menu").onclick = () => {
+    resetKeyOrderFlow();
+    state.screenStack = ["screen-password", "screen-operator", "screen-menu"];
+    showScreen("screen-menu");
+  };
 
-  document.getElementById("ko-add-line").onclick = () => linesWrap.appendChild(makeLineRow());
-
-  document.getElementById("ko-new-order").onclick = () => initKeyOrderScreen();
-  document.getElementById("ko-back-menu").onclick = () => { state.screenStack = ["screen-password", "screen-operator", "screen-menu"]; showScreen("screen-menu"); };
-
-  document.getElementById("key-order-form").onsubmit = submitKeyOrder;
-}
-
-function getSelectedMethod() {
-  const active = document.querySelector("#ko-method-row .size-chip.active");
-  return active ? active.dataset.method : PICKUP_METHODS[0];
+  document.getElementById("ko-order-form").onsubmit = submitKeyOrder;
 }
 
 async function submitKeyOrder(e) {
   e.preventDefault();
-  const lines = Array.from(document.querySelectorAll("#ko-lines .ko-line")).map(row => {
-    const productKey = row.querySelector(".ko-line-product").value;
-    const product = FF_PRODUCTS.find(p => p.key === productKey);
-    return {
-      productName: product ? product.name : productKey,
-      flavor: row.querySelector(".ko-line-flavor").value,
-      qty: Number(row.querySelector(".ko-line-qty").value) || 0,
-    };
-  }).filter(l => l.qty > 0);
+  if (state.koCart.length === 0) {
+    alert("還沒有加入任何禮盒品項，請先返回加入至少一項。");
+    return;
+  }
 
+  const lines = state.koCart.flatMap(item => item.lines);
   const pickupDate = document.getElementById("ko-pickup-date").value;
   const mailDate = document.getElementById("ko-mail-date").value;
 
@@ -273,7 +650,7 @@ async function submitKeyOrder(e) {
 }
 
 function showKeyOrderResult(targetDate) {
-  document.getElementById("key-order-form").classList.add("hidden");
+  document.getElementById("ko-order-form").classList.add("hidden");
   const resultBox = document.getElementById("ko-result");
   resultBox.classList.remove("hidden");
   const summaryBox = document.getElementById("ko-day-summary");
@@ -401,7 +778,7 @@ function renderDateList() {
   const wrap = document.getElementById("list-view");
   wrap.innerHTML = "";
   const counts = countsByDate();
-  const dates = Array.from(counts.keys()).sort(); // 由近到遠（字串日期可直接排序）
+  const dates = Array.from(counts.keys()).sort();
 
   if (dates.length === 0) {
     wrap.innerHTML = `<p style="color:var(--ink-soft);font-size:14px;">目前沒有排定日期的訂單。</p>`;
@@ -463,18 +840,22 @@ function openOrderDetail(orderId) {
 function renderOrderDetail() {
   const order = state.orders.find(o => o["訂單ID"] === state.currentDetailId);
   const body = document.getElementById("order-detail-body");
+  const statusBtn = document.getElementById("order-toggle-status");
+  const deleteBtn = document.getElementById("order-delete");
+
   if (!order) {
-    body.innerHTML = `<p>找不到這筆訂單，可能已經被移除。</p>`;
-    document.getElementById("order-toggle-status").classList.add("hidden");
+    body.innerHTML = `<p>找不到這筆訂單，可能已經被刪除。</p>`;
+    statusBtn.classList.add("hidden");
+    deleteBtn.classList.add("hidden");
     return;
   }
+
+  const joinIfAny = (a, b) => (a || b ? `${a || ""}　${b || ""}` : "");
 
   const lines = (order["品項明細"] && order["品項明細"].lines) || [];
   const linesHtml = lines.length
     ? lines.map(l => `<div class="detail-row"><span class="k">${l.productName}｜${l.flavor}</span><span class="v">${l.qty}</span></div>`).join("")
     : `<div class="detail-row"><span class="k">品項明細</span><span class="v">（無結構化明細，請看備註）</span></div>`;
-
-  const joinIfAny = (a, b) => (a || b ? `${a || ""}　${b || ""}` : "");
 
   const rows = [
     ["建立人", order["建立人"]],
@@ -494,10 +875,12 @@ function renderOrderDetail() {
     `<div class="section-title">品項明細</div>${linesHtml}`;
 
   const done = order["出貨狀態"] === "已完成";
-  const btn = document.getElementById("order-toggle-status");
-  btn.classList.remove("hidden");
-  btn.textContent = done ? "取消完成（改回未處理）" : "標記完成";
-  btn.onclick = () => toggleOrderStatus(order, done);
+  statusBtn.classList.remove("hidden");
+  statusBtn.textContent = done ? "取消完成（改回未處理）" : "標記完成";
+  statusBtn.onclick = () => toggleOrderStatus(order, done);
+
+  deleteBtn.classList.remove("hidden");
+  deleteBtn.onclick = () => deleteOrder(order);
 }
 
 async function toggleOrderStatus(order, currentlyDone) {
@@ -519,11 +902,32 @@ async function toggleOrderStatus(order, currentlyDone) {
   }
 }
 
+async function deleteOrder(order) {
+  const who = order["訂貨人姓名"] || order["收貨人姓名"] || "（未填姓名）";
+  const when = shipDate(order) || "未填日期";
+  const ok = confirm(`確定要刪除這張訂單嗎？\n\n訂購人：${who}\n日期：${when}\n\n刪除後這張單會從所有清單裡消失，這個動作無法在畫面上復原，如果按錯了要請管理者從試算表救回來。`);
+  if (!ok) return;
+
+  const btn = document.getElementById("order-delete");
+  btn.disabled = true;
+  try {
+    await apiPost({ action: "deleteOrder", orderId: order["訂單ID"], operator: state.operator });
+    await refreshOrders();
+    goBack();
+  } catch (err) {
+    alert("刪除失敗：" + err.message);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
 // ---------------- 初始化 ----------------
 document.addEventListener("DOMContentLoaded", () => {
   document.body.addEventListener("click", (e) => {
     if (e.target.closest("[data-back]")) goBack();
   });
   initOperatorScreen();
+  initKeyOrderCartScreen();
+  initKoBoxDetailScreen();
   initPasswordScreen();
 });
