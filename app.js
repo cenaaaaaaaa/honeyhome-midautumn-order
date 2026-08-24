@@ -26,6 +26,7 @@ const state = {
   combo: {
     boxId: null,
     size: null,
+    boxQty: 1, // 這個組合要訂購幾盒
     qty: {}, // { productKey: { flavorName: number } }
   },
   cart: [], // 已加入訂單清單的禮盒們：{ boxName, summary, total }
@@ -218,6 +219,7 @@ function startCombo(boxId) {
 
   state.combo.boxId = boxId;
   state.combo.size = box.sizes ? box.sizes[0] : null;
+  state.combo.boxQty = 1;
   state.combo.qty = {};
 
   if (box.type === "single") {
@@ -326,6 +328,40 @@ function handleQtyBlur(e) {
   if (e.target.value === "") e.target.value = "0";
 }
 
+// ---------------- 這個組合要訂購幾盒 ----------------
+function setBoxQty(rawValue) {
+  let val = parseInt(rawValue, 10);
+  if (isNaN(val) || val < 1) val = 1;
+  if (val > 99) val = 99;
+  state.combo.boxQty = val;
+  return val;
+}
+
+function bumpBoxQty(delta) {
+  const next = setBoxQty(state.combo.boxQty + delta);
+  document.getElementById("box-qty-input").value = next;
+  const box = findBox(state.combo.boxId);
+  if (box) updateComboSummary(box);
+}
+
+function handleBoxQtyInput(e) {
+  const raw = e.target.value;
+  const clamped = setBoxQty(raw);
+  if (raw !== "" && String(clamped) !== raw) {
+    e.target.value = clamped;
+  }
+  const box = findBox(state.combo.boxId);
+  if (box) updateComboSummary(box);
+}
+
+function handleBoxQtyBlur(e) {
+  if (e.target.value === "") {
+    e.target.value = setBoxQty(1);
+    const box = findBox(state.combo.boxId);
+    if (box) updateComboSummary(box);
+  }
+}
+
 function renderComboDetail() {
   const box = findBox(state.combo.boxId);
   if (!box) return;
@@ -337,9 +373,12 @@ function renderComboDetail() {
       <div class="alert-note">這個禮盒還有品項（小月餅）的價格與口味資料尚未補齊，暫時無法在線上組合，請直接洽詢門市：
       <a href="tel:${SHOP_INFO.phone.replace(/-/g, "")}">${SHOP_INFO.phoneDisplay}</a> / LINE ${SHOP_INFO.line}</div>`;
     document.getElementById("combo-summary").classList.add("hidden");
+    document.getElementById("box-qty-row").classList.add("hidden");
     return;
   }
   document.getElementById("combo-summary").classList.remove("hidden");
+  document.getElementById("box-qty-row").classList.remove("hidden");
+  document.getElementById("box-qty-input").value = state.combo.boxQty;
 
   let html = "";
 
@@ -398,8 +437,8 @@ function renderComboDetail() {
     });
   });
 
-  // 綁定數量按鈕
-  document.querySelectorAll(".qty-btn").forEach(btn => {
+  // 綁定數量按鈕（限定在 combo-detail-body 裡，避免跟下面的「訂購幾盒」搶到）
+  document.querySelectorAll("#combo-detail-body .qty-btn").forEach(btn => {
     btn.addEventListener("click", () => {
       const delta = btn.dataset.action === "inc" ? 1 : -1;
       bumpQty(btn.dataset.key, btn.dataset.flavor, delta, box);
@@ -407,7 +446,7 @@ function renderComboDetail() {
   });
 
   // 綁定數量輸入框（可以直接打數字，不用一直按 +）
-  document.querySelectorAll(".qty-num-input").forEach(input => {
+  document.querySelectorAll("#combo-detail-body .qty-num-input").forEach(input => {
     input.addEventListener("input", handleQtyInput);
     input.addEventListener("blur", handleQtyBlur);
     input.addEventListener("focus", () => input.select());
@@ -420,7 +459,9 @@ function updateComboSummary(box) {
   const target = comboOverallTarget(box);
   const selected = comboOverallSelected(box);
   const remain = target != null ? target - selected : 0;
-  const total = comboTotalPrice(box);
+  const perBoxTotal = comboTotalPrice(box);
+  const boxQty = state.combo.boxQty;
+  const total = perBoxTotal * boxQty;
 
   const remainEl = document.getElementById("combo-remain");
   if (target == null) {
@@ -436,16 +477,21 @@ function updateComboSummary(box) {
     remainEl.className = "remain ok";
   }
 
-  document.getElementById("combo-total").textContent = `總金額：$${total}`;
+  document.getElementById("combo-total").textContent =
+    boxQty > 1 ? `總金額：$${total}（每盒 $${perBoxTotal} × ${boxQty} 盒）` : `總金額：$${total}`;
 
   const nextBtn = document.getElementById("combo-next-btn");
-  nextBtn.disabled = !(target != null && remain === 0 && total > 0);
+  nextBtn.disabled = !(target != null && remain === 0 && perBoxTotal > 0);
 }
 
 function comboSummaryText(box) {
+  const boxQty = state.combo.boxQty;
+  const perBoxTotal = comboTotalPrice(box);
+
   let lines = [];
   lines.push(`禮盒：${box.name}`);
   if (state.combo.size) lines.push(`份量：${state.combo.size} 入`);
+  if (boxQty > 1) lines.push(`訂購盒數：${boxQty} 盒`);
 
   const keys = box.type === "single" ? [box.productKey] : box.type === "mixFree" ? box.productKeys : box.parts.map(p => p.productKey);
   keys.forEach(k => {
@@ -457,7 +503,7 @@ function comboSummaryText(box) {
     if (parts.length) lines.push(`${product.name}：${parts.join("、")}`);
   });
 
-  lines.push(`總金額：$${comboTotalPrice(box)}`);
+  lines.push(boxQty > 1 ? `總金額：$${perBoxTotal * boxQty}（每盒 $${perBoxTotal} × ${boxQty} 盒）` : `總金額：$${perBoxTotal}`);
   return lines.join("\n");
 }
 
@@ -471,7 +517,7 @@ function addCurrentToCart() {
   state.cart.push({
     boxName: box.name,
     summary: comboSummaryText(box),
-    total: comboTotalPrice(box),
+    total: comboTotalPrice(box) * state.combo.boxQty,
   });
   renderCart();
   goTo("screen-cart");
@@ -649,6 +695,11 @@ document.addEventListener("DOMContentLoaded", () => {
   initHome();
 
   document.getElementById("combo-next-btn").addEventListener("click", addCurrentToCart);
+  document.getElementById("box-qty-dec").addEventListener("click", () => bumpBoxQty(-1));
+  document.getElementById("box-qty-inc").addEventListener("click", () => bumpBoxQty(1));
+  document.getElementById("box-qty-input").addEventListener("input", handleBoxQtyInput);
+  document.getElementById("box-qty-input").addEventListener("blur", handleBoxQtyBlur);
+  document.getElementById("box-qty-input").addEventListener("focus", e => e.target.select());
   document.getElementById("cart-add-more-btn").addEventListener("click", () => {
     renderComboBoxPicker();
     goTo("screen-combo-pick");
