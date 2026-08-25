@@ -14,6 +14,9 @@ const state = {
   koCombo: { boxId: null, size: null, boxQty: 1, qty: {} },
   // key 訂單用：這張訂單目前已經加入的禮盒品項清單
   koCart: [],
+  // 有值代表現在是「點進購物車裡某一項，修改內容」，而不是新增一個全新品項，
+  // 「加入品項清單」按下去時要改成覆蓋這個索引，而不是往後新增一筆。
+  koCartEditIndex: null,
   // 編輯既有訂單用：有值代表現在是「編輯模式」而不是「新增一張訂單」，
   // koEditOriginal 存原始訂單物件，用來預填訂購資訊表單。
   koEditOrderId: null,
@@ -196,6 +199,7 @@ function initMenuScreen() {
 function resetKeyOrderFlow() {
   state.koCart = [];
   state.koCombo = { boxId: null, size: null, boxQty: 1, qty: {} };
+  state.koCartEditIndex = null;
   state.koEditOrderId = null;
   state.koEditOriginal = null;
 }
@@ -264,13 +268,22 @@ function renderKoCart() {
     const el = document.createElement("div");
     el.className = "order-recap";
     el.style.position = "relative";
+    const editable = !!item.boxId;
+    if (editable) el.style.cursor = "pointer";
     el.innerHTML = `
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
         <strong style="color:var(--maroon);">第 ${idx + 1} 項</strong>
         <button class="ghost-btn" data-remove="${idx}" style="padding:4px 12px;font-size:12px;">移除</button>
       </div>
       ${item.summary.replace(/\n/g, "<br>")}
+      ${editable ? `<div style="margin-top:6px;font-size:11px;color:var(--ink-soft);">點一下可以修改這個品項的口味/數量</div>` : ""}
     `;
+    if (editable) {
+      el.addEventListener("click", (e) => {
+        if (e.target.closest("[data-remove]")) return;
+        startEditKoCartItem(idx);
+      });
+    }
     wrap.appendChild(el);
   });
 
@@ -288,6 +301,7 @@ function renderKoCart() {
 
 function initKeyOrderCartScreen() {
   document.getElementById("ko-add-box").onclick = () => {
+    state.koCartEditIndex = null;
     renderKoBoxGrid();
     goTo("screen-ko-box-pick");
   };
@@ -324,15 +338,10 @@ function renderKoBoxGrid() {
   });
 }
 
-function startKoBox(boxId) {
-  const box = findKoBox(boxId);
-  if (!box) return;
-
-  state.koCombo.boxId = boxId;
-  state.koCombo.size = box.sizes ? box.sizes[0] : null;
-  state.koCombo.boxQty = 1;
+// 依禮盒種類，把 state.koCombo.qty 初始化成正確的空結構（每個品項一個空物件）。
+// startKoBox（新增）跟 startEditKoCartItem（點購物車品項進去改）共用同一套初始化邏輯。
+function initKoComboQtyStructure(box) {
   state.koCombo.qty = {};
-
   if (box.type === "fixed") {
     // 固定禮盒沒有品項可以調，不用建立 qty 物件
   } else if (box.type === "single") {
@@ -342,8 +351,48 @@ function startKoBox(boxId) {
   } else if (box.type === "mixFixed") {
     box.parts.forEach(p => (state.koCombo.qty[p.productKey] = {}));
   }
+}
+
+function startKoBox(boxId) {
+  const box = findKoBox(boxId);
+  if (!box) return;
+
+  state.koCartEditIndex = null; // 新增全新品項，不是在改購物車裡既有的那一項
+  state.koCombo.boxId = boxId;
+  state.koCombo.size = box.sizes ? box.sizes[0] : null;
+  state.koCombo.boxQty = 1;
+  initKoComboQtyStructure(box);
 
   renderKoBoxDetail();
+  document.getElementById("ko-box-add-btn").textContent = "加入品項清單";
+  goTo("screen-ko-box-detail");
+}
+
+// 點購物車裡已經加入的某一項，把它的內容灌回 state.koCombo，重新打開同一個禮盒內容畫面調整。
+// 只有能對回 data.js 禮盒定義的品項才能這樣編輯（item.boxId 有值）；
+// 對不到的（例如客人訂單裡比較舊、格式對不上的品項）還是只能整項移除後重新加入。
+function startEditKoCartItem(idx) {
+  const item = state.koCart[idx];
+  if (!item || !item.boxId) return;
+  const box = findKoBox(item.boxId);
+  if (!box) return;
+
+  state.koCartEditIndex = idx;
+  state.koCombo.boxId = item.boxId;
+  state.koCombo.size = item.size || (box.sizes ? box.sizes[0] : null);
+  state.koCombo.boxQty = item.boxQty || 1;
+  initKoComboQtyStructure(box);
+
+  // lines 裡的 qty 是已經乘過 boxQty 的，要除回「每盒」的數量才能灌回 qty 選擇器。
+  const boxQty = item.boxQty || 1;
+  (item.lines || []).forEach(l => {
+    const product = Object.values(PRODUCTS).find(p => p.name === l.productName);
+    if (!product || !state.koCombo.qty[product.key]) return;
+    state.koCombo.qty[product.key][l.flavor] = Math.round((l.qty || 0) / boxQty);
+  });
+
+  renderKoBoxDetail();
+  document.getElementById("ko-box-add-btn").textContent = "更新這個品項";
   goTo("screen-ko-box-detail");
 }
 
@@ -613,7 +662,7 @@ function initKoBoxDetailScreen() {
     const box = findKoBox(state.koCombo.boxId);
     if (!box) return;
     const boxQty = box.type === "fixed" ? state.koCombo.boxQty : state.koCombo.boxQty;
-    state.koCart.push({
+    const cartItem = {
       boxName: box.name,
       boxId: box.id,
       size: box.type === "fixed" ? null : state.koCombo.size,
@@ -621,7 +670,15 @@ function initKoBoxDetailScreen() {
       summary: koComboSummaryText(box),
       lines: koComboStructured(box).map(item => ({ ...item, qty: item.qty * boxQty })),
       total: koComboTotalPrice(box) * boxQty,
-    });
+    };
+    // 有 koCartEditIndex 代表是從購物車點進來修改既有品項，改成覆蓋原本那一筆；
+    // 沒有的話才是「新增一個禮盒品項」，往購物車後面加一筆新的。
+    if (state.koCartEditIndex != null) {
+      state.koCart[state.koCartEditIndex] = cartItem;
+      state.koCartEditIndex = null;
+    } else {
+      state.koCart.push(cartItem);
+    }
     backToKoCart();
     renderKoCart();
   };
