@@ -70,7 +70,7 @@
 <section id="screen-key-order" class="screen page hidden">
   <div class="topbar">
     <button class="back-btn" data-back>‹</button>
-    <h1>key 訂單</h1>
+    <h1 id="ko-cart-title">key 訂單</h1>
   </div>
   <p style="color:var(--ink-soft);font-size:14px;">建立人：<strong id="ko-cart-operator" style="color:var(--maroon);"></strong></p>
   <div id="ko-cart-list"></div>
@@ -119,7 +119,7 @@
 <section id="screen-ko-order-form" class="screen page hidden">
   <div class="topbar">
     <button class="back-btn" data-back>‹</button>
-    <h1>填寫訂購資訊</h1>
+    <h1 id="ko-form-title">填寫訂購資訊</h1>
   </div>
 
   <div class="order-recap" id="ko-order-recap"></div>
@@ -172,7 +172,7 @@
       <textarea id="ko-note" placeholder="例如：手寫單號 #23、客人特別要求..."></textarea>
     </div>
 
-    <button type="submit" class="solid-btn">送出訂單</button>
+    <button type="submit" id="ko-submit-btn" class="solid-btn">送出訂單</button>
   </form>
 
   <div id="ko-result" class="hidden">
@@ -224,6 +224,7 @@
   </div>
   <div id="order-detail-body"></div>
   <button id="order-toggle-status" class="solid-btn" style="margin-top:16px;">標記完成</button>
+  <button id="order-edit" class="ghost-btn" style="width:100%;margin-top:10px;">編輯這張訂單</button>
   <button id="order-delete" class="ghost-btn danger-btn" style="width:100%;margin-top:10px;">刪除這張訂單</button>
 </section>
 

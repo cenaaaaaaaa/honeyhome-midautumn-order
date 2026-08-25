@@ -14,6 +14,10 @@ const state = {
   koCombo: { boxId: null, size: null, boxQty: 1, qty: {} },
   // key 訂單用：這張訂單目前已經加入的禮盒品項清單
   koCart: [],
+  // 編輯既有訂單用：有值代表現在是「編輯模式」而不是「新增一張訂單」，
+  // koEditOriginal 存原始訂單物件，用來預填訂購資訊表單。
+  koEditOrderId: null,
+  koEditOriginal: null,
 };
 
 // ---------------- 畫面切換 ----------------
@@ -192,10 +196,63 @@ function initMenuScreen() {
 function resetKeyOrderFlow() {
   state.koCart = [];
   state.koCombo = { boxId: null, size: null, boxQty: 1, qty: {} };
+  state.koEditOrderId = null;
+  state.koEditOriginal = null;
+}
+
+// 把訂單原本的分組品項（boxes）轉成 key 訂單購物車格式，讓「編輯」可以沿用同一套介面。
+// 盡量比對回 data.js 裡的禮盒定義（用名稱比對 boxId），比對不到也沒關係，
+// 這個品項一樣可以在購物車裡被移除、只是沒辦法點進去重新調整口味明細，只能整項移除後重新加入。
+function boxesToKoCart(order) {
+  return orderBoxes(order).map(box => {
+    const matched = allKoBoxes().find(b => b.name === box.boxName);
+    return {
+      boxName: box.boxName || "",
+      boxId: matched ? matched.id : null,
+      size: box.size || null,
+      boxQty: box.boxQty || 1,
+      lines: Array.isArray(box.lines) ? box.lines : [],
+      summary: koRebuildSummaryFromBox(box),
+      total: koEstimateBoxTotal(box),
+    };
+  });
+}
+
+function koRebuildSummaryFromBox(box) {
+  const lines = [`禮盒：${box.boxName || "（未命名）"}`];
+  if (box.size) lines.push(`份量：${box.size} 入`);
+  if (box.boxQty > 1) lines.push(`訂購盒數：${box.boxQty} 盒`);
+  (box.lines || []).forEach(l => lines.push(`${l.productName}：${l.flavor} x${l.qty}`));
+  return lines.join("\n");
+}
+
+// 用品名回頭去 PRODUCTS / FIXED_BOXES 查單價，估出這個品項的小計，
+// 純粹是購物車畫面上的參考金額，不是送出時真正採用的總金額（總金額那格永遠是手動填寫的欄位）。
+function koEstimateBoxTotal(box) {
+  let sum = 0;
+  (box.lines || []).forEach(l => {
+    const product = Object.values(PRODUCTS).find(p => p.name === l.productName);
+    if (product) { sum += (product.price || 0) * (l.qty || 0); return; }
+    const fixedBox = FIXED_BOXES.find(b => b.name === l.productName);
+    if (fixedBox) sum += (fixedBox.price || 0) * (l.qty || 0);
+  });
+  return sum;
+}
+
+// 從訂單詳情頁點「編輯這張訂單」進來，把原本的品項/資料帶進 key 訂單那套介面。
+function startEditOrder(order) {
+  state.koEditOrderId = order["訂單ID"];
+  state.koEditOriginal = order;
+  state.koCart = boxesToKoCart(order);
+  state.koCombo = { boxId: null, size: null, boxQty: 1, qty: {} };
+  goToMenuDirect();
+  goTo("screen-key-order");
+  renderKoCart();
 }
 
 function renderKoCart() {
   document.getElementById("ko-cart-operator").textContent = state.operator;
+  document.getElementById("ko-cart-title").textContent = state.koEditOrderId ? "編輯訂單" : "key 訂單";
   const wrap = document.getElementById("ko-cart-list");
   wrap.innerHTML = "";
 
@@ -580,7 +637,11 @@ function getSelectedMethod() {
 }
 
 function initKoOrderFormScreen() {
-  document.getElementById("ko-operator").value = state.operator;
+  const isEdit = !!state.koEditOrderId;
+  const o = state.koEditOriginal;
+
+  document.getElementById("ko-form-title").textContent = isEdit ? "編輯訂購資訊" : "填寫訂購資訊";
+  document.getElementById("ko-submit-btn").textContent = isEdit ? "儲存修改" : "送出訂單";
   document.getElementById("ko-result").classList.add("hidden");
   document.getElementById("ko-order-form").classList.remove("hidden");
   document.getElementById("ko-order-form").reset();
@@ -588,15 +649,18 @@ function initKoOrderFormScreen() {
 
   const recap = state.koCart.map((item, idx) => `【第 ${idx + 1} 項】\n${item.summary}`).join("\n\n");
   const cartTotal = state.koCart.reduce((sum, i) => sum + i.total, 0);
-  document.getElementById("ko-order-recap").textContent = `${recap}\n\n目前總金額：$${cartTotal}`;
-  document.getElementById("ko-total").value = cartTotal;
+  const totalForField = isEdit ? Number(o["總金額"]) || 0 : cartTotal;
+  document.getElementById("ko-order-recap").textContent = `${recap}\n\n${isEdit ? "原總金額" : "目前總金額"}：$${totalForField}`;
+  document.getElementById("ko-total").value = totalForField;
 
   const methodRow = document.getElementById("ko-method-row");
   methodRow.innerHTML = "";
+  const currentMethod = isEdit ? o["取貨方式"] : null;
   PICKUP_METHODS.forEach((m, idx) => {
     const btn = document.createElement("button");
     btn.type = "button";
-    btn.className = "size-chip" + (idx === 0 ? " active" : "");
+    const active = currentMethod ? m === currentMethod : idx === 0;
+    btn.className = "size-chip" + (active ? " active" : "");
     btn.textContent = m;
     btn.dataset.method = m;
     btn.addEventListener("click", () => {
@@ -605,6 +669,17 @@ function initKoOrderFormScreen() {
     });
     methodRow.appendChild(btn);
   });
+
+  if (isEdit) {
+    document.getElementById("ko-pickup-date").value = o["取貨日期"] || "";
+    document.getElementById("ko-mail-date").value = o["寄件日期"] || "";
+    document.getElementById("ko-name").value = o["訂貨人姓名"] || "";
+    document.getElementById("ko-phone").value = o["訂貨人電話"] || "";
+    document.getElementById("ko-recipient-name").value = o["收貨人姓名"] || "";
+    document.getElementById("ko-recipient-phone").value = o["收貨人電話"] || "";
+    document.getElementById("ko-address").value = o["收貨人地址"] || "";
+    document.getElementById("ko-note").value = o["備註"] || "";
+  }
 
   document.getElementById("ko-new-order").onclick = () => {
     resetKeyOrderFlow();
@@ -653,18 +728,28 @@ async function submitKeyOrder(e) {
     boxes,
   };
 
+  const isEdit = !!state.koEditOrderId;
   const submitBtn = e.target.querySelector('button[type="submit"]');
   submitBtn.disabled = true;
-  submitBtn.textContent = "送出中…";
+  submitBtn.textContent = isEdit ? "儲存中…" : "送出中…";
   try {
-    await apiPost({ action: "addOrder", order });
-    await refreshOrders();
-    showKeyOrderResult(pickupDate || mailDate);
+    if (isEdit) {
+      const orderId = state.koEditOrderId;
+      await apiPost({ action: "updateOrder", orderId, order });
+      await refreshOrders();
+      resetKeyOrderFlow();
+      goToMenuDirect();
+      openOrderDetail(orderId);
+    } else {
+      await apiPost({ action: "addOrder", order });
+      await refreshOrders();
+      showKeyOrderResult(pickupDate || mailDate);
+    }
   } catch (err) {
-    alert("送出失敗：" + err.message);
+    alert((isEdit ? "儲存失敗：" : "送出失敗：") + err.message);
   } finally {
     submitBtn.disabled = false;
-    submitBtn.textContent = "送出訂單";
+    submitBtn.textContent = isEdit ? "儲存修改" : "送出訂單";
   }
 }
 
@@ -873,11 +958,13 @@ function renderOrderDetail() {
   const order = state.orders.find(o => o["訂單ID"] === state.currentDetailId);
   const body = document.getElementById("order-detail-body");
   const statusBtn = document.getElementById("order-toggle-status");
+  const editBtn = document.getElementById("order-edit");
   const deleteBtn = document.getElementById("order-delete");
 
   if (!order) {
     body.innerHTML = `<p>找不到這筆訂單，可能已經被刪除。</p>`;
     statusBtn.classList.add("hidden");
+    editBtn.classList.add("hidden");
     deleteBtn.classList.add("hidden");
     return;
   }
@@ -936,6 +1023,9 @@ function renderOrderDetail() {
   statusBtn.classList.remove("hidden");
   statusBtn.textContent = done ? "整張訂單取消完成（改回未處理）" : "整張訂單標記完成";
   statusBtn.onclick = () => toggleOrderStatus(order, done);
+
+  editBtn.classList.remove("hidden");
+  editBtn.onclick = () => startEditOrder(order);
 
   deleteBtn.classList.remove("hidden");
   deleteBtn.onclick = () => deleteOrder(order);
