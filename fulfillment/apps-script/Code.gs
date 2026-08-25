@@ -31,6 +31,7 @@ const SHIP_HEADERS = [
   "收貨人姓名", "收貨人電話", "收貨人地址",
   "品項明細JSON", "總金額", "備註", "出貨狀態",
   "建立時間", "完成人", "完成時間", "刪除人", "刪除時間",
+  "最後修改人", "最後修改時間",
 ];
 
 // ---------- 入口：GET（讀取訂單清單） ----------
@@ -63,6 +64,11 @@ function doPost(e) {
     if (body.action === "addOrder") {
       const order = addManualOrder_(body.order || {});
       return jsonOut_({ ok: true, order });
+    }
+
+    if (body.action === "updateOrder") {
+      updateOrder_(body.orderId, body.order || {});
+      return jsonOut_({ ok: true });
     }
 
     if (body.action === "updateStatus") {
@@ -199,6 +205,56 @@ function addManualOrder_(order) {
   sheet.appendRow(row);
 
   return { id };
+}
+
+// 編輯既有訂單：可以是手動 key 的訂單，也可以是客人網頁下單同步進來的訂單。
+// 「訂單ID」「來源」「來源列號」「建立人」「建立時間」都保持不變，
+// 只覆蓋可調整的欄位，另外記錄「最後修改人」「最後修改時間」方便之後回頭查是誰、什麼時候改的。
+// 如果訂單原本已經標記完成，編輯後內容可能已經跟包裝好的東西不一樣，
+// 所以會自動把「出貨狀態」跟每個品項的完成勾選都重設回未處理，需要重新核對。
+function updateOrder_(orderId, order) {
+  const sheet = getShipSheet_();
+  const { rowNum, headers } = findShipRow_(sheet, orderId);
+  const idx = {};
+  headers.forEach((h, i) => { idx[h] = i; });
+
+  const boxes = (Array.isArray(order.boxes) ? order.boxes : []).map(b => ({
+    boxName: b.boxName || "",
+    size: b.size || null,
+    boxQty: b.boxQty || 1,
+    lines: Array.isArray(b.lines) ? b.lines : [],
+    done: false,
+  }));
+
+  const updates = {
+    "取貨方式": order.method || "",
+    "取貨日期": order.pickupDate || "",
+    "寄件日期": order.mailDate || "",
+    "訂貨人姓名": order.customerName || "",
+    "訂貨人電話": order.customerPhone || "",
+    "收貨人姓名": order.recipientName || "",
+    "收貨人電話": order.recipientPhone || "",
+    "收貨人地址": order.recipientAddress || "",
+    "品項明細JSON": JSON.stringify({ boxes: boxes }),
+    "總金額": order.total || "",
+    "備註": order.note || "",
+    "最後修改人": order.operator || "",
+    "最後修改時間": new Date(),
+  };
+
+  const statusCol = idx["出貨狀態"];
+  if (statusCol != null) {
+    const currentStatus = sheet.getRange(rowNum, statusCol + 1).getValue();
+    if (currentStatus === "已完成") {
+      updates["出貨狀態"] = "未處理";
+      updates["完成人"] = "";
+      updates["完成時間"] = "";
+    }
+  }
+
+  Object.keys(updates).forEach(h => {
+    if (h in idx) sheet.getRange(rowNum, idx[h] + 1).setValue(updates[h]);
+  });
 }
 
 function findShipRow_(sheet, orderId) {
