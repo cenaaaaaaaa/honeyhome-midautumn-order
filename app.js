@@ -390,7 +390,7 @@ function handleQtyBlur(e) {
 function setBoxQty(rawValue) {
   let val = parseInt(rawValue, 10);
   if (isNaN(val) || val < 1) val = 1;
-  if (val > 99) val = 99;
+  if (val > 300) val = 300;
   state.combo.boxQty = val;
   return val;
 }
