@@ -180,9 +180,8 @@ function renderBoxGallery() {
     renderCard(box, metaText, "試著組合這款", () => startCombo(box.id), box.pending);
   });
 
-  wrap.insertAdjacentHTML("beforeend", `<div class="section-title">固定禮盒</div>`);
   FIXED_BOXES.forEach(box => {
-    renderCard(box, `${box.size}／$${box.price}／整盒固定內容`, "查看聯絡方式", () => goTo("screen-fixed-contact"));
+    renderCard(box, `${box.size}／$${box.price}／整盒固定內容`, "試著組合這款", () => startCombo(box.id));
   });
 }
 
@@ -322,6 +321,7 @@ function comboOverallSelected(box) {
 }
 
 function comboTotalPrice(box) {
+  if (box.type === "fixed") return box.price;
   let total = 0;
   const keys = box.type === "single" ? [box.productKey] : box.type === "mixFree" ? box.productKeys : box.parts.map(p => p.productKey);
   keys.forEach(k => {
@@ -481,6 +481,8 @@ function renderComboDetail() {
     box.parts.forEach(p => {
       html += renderPartFlavors(p.productKey, `${PRODUCTS[p.productKey].name}（限 ${p.qty} 入）`);
     });
+  } else if (box.type === "fixed") {
+    html += `<p style="color:var(--ink-soft);font-size:14px;">這款是整盒固定內容（${box.size}），沒有口味可以調整，直接選擇要訂購幾盒就可以囉。</p>`;
   }
 
   document.getElementById("combo-detail-body").innerHTML = html;
@@ -514,6 +516,18 @@ function renderComboDetail() {
 }
 
 function updateComboSummary(box) {
+  // 固定禮盒沒有口味可湊，只需要看訂購幾盒，永遠算「已完成」
+  if (box.type === "fixed") {
+    const perBoxTotal = box.price;
+    const boxQty = state.combo.boxQty;
+    const total = perBoxTotal * boxQty;
+    document.getElementById("combo-remain").textContent = "";
+    document.getElementById("combo-total").textContent =
+      boxQty > 1 ? `總金額：$${total}（每盒 $${perBoxTotal} × ${boxQty} 盒）` : `總金額：$${total}`;
+    document.getElementById("combo-next-btn").disabled = false;
+    return;
+  }
+
   const target = comboOverallTarget(box);
   const selected = comboOverallSelected(box);
   const remain = target != null ? target - selected : 0;
@@ -551,15 +565,19 @@ function comboSummaryText(box) {
   if (state.combo.size) lines.push(`份量：${state.combo.size} 入`);
   if (boxQty > 1) lines.push(`訂購盒數：${boxQty} 盒`);
 
-  const keys = box.type === "single" ? [box.productKey] : box.type === "mixFree" ? box.productKeys : box.parts.map(p => p.productKey);
-  keys.forEach(k => {
-    const product = PRODUCTS[k];
-    const qtyObj = state.combo.qty[k] || {};
-    const parts = Object.entries(qtyObj)
-      .filter(([, q]) => q > 0)
-      .map(([flavor, q]) => `${flavor} x${q}`);
-    if (parts.length) lines.push(`${product.name}：${parts.join("、")}`);
-  });
+  if (box.type === "fixed") {
+    lines.push(`內容：${box.size}，整盒固定內容`);
+  } else {
+    const keys = box.type === "single" ? [box.productKey] : box.type === "mixFree" ? box.productKeys : box.parts.map(p => p.productKey);
+    keys.forEach(k => {
+      const product = PRODUCTS[k];
+      const qtyObj = state.combo.qty[k] || {};
+      const parts = Object.entries(qtyObj)
+        .filter(([, q]) => q > 0)
+        .map(([flavor, q]) => `${flavor} x${q}`);
+      if (parts.length) lines.push(`${product.name}：${parts.join("、")}`);
+    });
+  }
 
   lines.push(boxQty > 1 ? `總金額：$${perBoxTotal * boxQty}（每盒 $${perBoxTotal} × ${boxQty} 盒）` : `總金額：$${perBoxTotal}`);
   return lines.join("\n");
@@ -568,6 +586,9 @@ function comboSummaryText(box) {
 // 給出貨系統用的結構化明細：把這盒的品項/口味/數量整理成好加總的格式，
 // 不影響畫面上人看的 comboSummaryText，純粹多存一份給機器讀。
 function comboStructured(box) {
+  if (box.type === "fixed") {
+    return [{ productKey: box.id, productName: box.name, flavors: [{ flavor: `整盒（${box.size}）`, qty: 1 }] }];
+  }
   const keys = box.type === "single" ? [box.productKey] : box.type === "mixFree" ? box.productKeys : box.parts.map(p => p.productKey);
   return keys.map(k => {
     const qtyObj = state.combo.qty[k] || {};

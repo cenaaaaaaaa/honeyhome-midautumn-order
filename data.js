@@ -61,6 +61,7 @@ const PRODUCTS = {
 };
 
 // 固定禮盒（不能拆單品自組，價格與內容都是整組固定）
+// type: "fixed" 代表這款沒有口味可選，「組合看看」頁面只需要選要訂購幾盒
 const FIXED_BOXES = [
   {
     id: "tufengli",
@@ -69,6 +70,7 @@ const FIXED_BOXES = [
     price: 420,
     desc: "整盒固定內容，無法調整口味比例。",
     img: "assets/img/tufengli.png",
+    type: "fixed",
   },
 ];
 
@@ -138,8 +140,8 @@ const MIX_BOXES = [
 ];
 
 // 給「自己組合看看」頁面用：把所有可以互動組合的禮盒放在一起
-// （固定禮盒不需要互動組合，所以不放進來）
-const COMBOABLE_BOXES = [...SINGLE_BOXES.map(b => ({ ...b, type: "single" })), ...MIX_BOXES];
+// （土鳳梨酥禮盒雖然沒有口味可選，但一樣可以選「訂購幾盒」，所以也放進來）
+const COMBOABLE_BOXES = [...SINGLE_BOXES.map(b => ({ ...b, type: "single" })), ...MIX_BOXES, ...FIXED_BOXES];
 
 // ============================================================
 // 產品照片頁（按鈕四）
