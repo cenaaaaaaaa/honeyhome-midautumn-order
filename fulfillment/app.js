@@ -11,7 +11,7 @@ const state = {
   viewMode: "calendar", // calendar | list
   currentDetailId: null,
   // key 訂單用：目前正在挑選中的禮盒（跟訂購網頁「自己組合看看」邏輯一樣）
-  koCombo: { boxId: null, size: null, boxQty: 1, qty: {}, partChoice: {}, packagingKey: null },
+  koCombo: { boxId: null, size: null, boxQty: 1, qty: {}, packagingKey: null },
   // key 訂單用：這張訂單目前已經加入的禮盒品項清單
   koCart: [],
   // 有值代表現在是「點進購物車裡某一項，修改內容」，而不是新增一個全新品項，
@@ -198,7 +198,7 @@ function initMenuScreen() {
 
 function resetKeyOrderFlow() {
   state.koCart = [];
-  state.koCombo = { boxId: null, size: null, boxQty: 1, qty: {}, partChoice: {}, packagingKey: null };
+  state.koCombo = { boxId: null, size: null, boxQty: 1, qty: {}, packagingKey: null };
   state.koCartEditIndex = null;
   state.koEditOrderId = null;
   state.koEditOriginal = null;
@@ -255,7 +255,7 @@ function startEditOrder(order) {
   state.koEditOrderId = order["訂單ID"];
   state.koEditOriginal = order;
   state.koCart = boxesToKoCart(order);
-  state.koCombo = { boxId: null, size: null, boxQty: 1, qty: {}, partChoice: {}, packagingKey: null };
+  state.koCombo = { boxId: null, size: null, boxQty: 1, qty: {}, packagingKey: null };
   goToMenuDirect();
   goTo("screen-key-order");
   renderKoCart();
@@ -330,16 +330,11 @@ function findKoBox(boxId) {
   return allKoBoxes().find(b => b.id === boxId);
 }
 
-// mixFixed 的每一格可能是固定品項（part.productKey）或可自選品項（part.productKeys，
-// 還沒選之前預設用陣列第一個）。統一算出「這一格現在實際代表哪個 productKey」。
-function koPartKey(box, idx) {
-  const part = box.parts[idx];
-  if (part.productKey) return part.productKey;
-  return (state.koCombo.partChoice && state.koCombo.partChoice[idx]) || part.productKeys[0];
-}
-
+// mixFixed 的每一格可能是固定品項（part.productKey，只有一種）或可自選品項
+// （part.productKeys，好幾種可以自由混搭，只要這一格的總數湊滿 part.qty 就好）。
+// 把一整個 box 展開成所有可能出現的 productKey 清單，其他函式都能用同一套邏輯遍歷。
 function koPartKeys(box) {
-  return box.parts.map((p, idx) => koPartKey(box, idx));
+  return box.parts.flatMap(p => (p.productKey ? [p.productKey] : p.productKeys));
 }
 
 function koPartDisplayName(part) {
@@ -347,38 +342,10 @@ function koPartDisplayName(part) {
   return part.productKeys.map(k => PRODUCTS[k].name).join("／");
 }
 
-function switchKoPartProduct(box, idx, newKey) {
-  const oldKey = koPartKey(box, idx);
-  if (oldKey === newKey) return;
-  state.koCombo.partChoice[idx] = newKey;
-  delete state.koCombo.qty[oldKey];
-  state.koCombo.qty[newKey] = {};
-  renderKoBoxDetail();
-}
-
 // 目前選的「包裝」選項（例如 A 禮盒的紙盒／塑膠盒 6 入），沒選就回傳 null。
 function koActivePackaging(box) {
   if (!box.packagingOptions || !state.koCombo.packagingKey) return null;
   return box.packagingOptions.find(o => o.key === state.koCombo.packagingKey) || null;
-}
-
-// 編輯購物車既有品項時，從它存下來的 lines（品名＋口味＋數量）反推「可自選品項」那格
-// 當初選的是哪個 productKey，才能正確灌回 state.koCombo，而不是每次都預設回第一個選項。
-function inferKoPartChoicesFromLines(box, lines) {
-  const choice = {};
-  if (box.type !== "mixFixed") return choice;
-  box.parts.forEach((p, idx) => {
-    if (!p.productKeys) return;
-    const found = (lines || []).find(l => {
-      const product = Object.values(PRODUCTS).find(pr => pr.name === l.productName);
-      return product && p.productKeys.includes(product.key);
-    });
-    if (found) {
-      const product = Object.values(PRODUCTS).find(pr => pr.name === found.productName);
-      choice[idx] = product.key;
-    }
-  });
-  return choice;
 }
 
 function renderKoBoxGrid() {
@@ -419,7 +386,6 @@ function startKoBox(boxId) {
   state.koCombo.boxId = boxId;
   state.koCombo.size = box.sizes ? box.sizes[0] : null;
   state.koCombo.boxQty = 1;
-  state.koCombo.partChoice = {};
   state.koCombo.packagingKey = null;
   initKoComboQtyStructure(box);
 
@@ -441,7 +407,6 @@ function startEditKoCartItem(idx) {
   state.koCombo.boxId = item.boxId;
   state.koCombo.size = item.size || (box.sizes ? box.sizes[0] : null);
   state.koCombo.boxQty = item.boxQty || 1;
-  state.koCombo.partChoice = inferKoPartChoicesFromLines(box, item.lines);
   state.koCombo.packagingKey = item.packagingKey || null;
   initKoComboQtyStructure(box);
 
@@ -462,14 +427,9 @@ function startEditKoCartItem(idx) {
 // key 訂單 - Part 3：填禮盒內容（口味/數量），邏輯跟訂購網頁的組合工具一致
 // ============================================================
 
-function koComboTargetForPart(box, productKey) {
-  if (box.type === "single") return state.koCombo.size;
-  if (box.type === "mixFree") return null;
-  if (box.type === "mixFixed") {
-    const idx = box.parts.findIndex((p, i) => koPartKey(box, i) === productKey);
-    return idx !== -1 ? box.parts[idx].qty : 0;
-  }
-  return 0;
+// 找出這個 productKey 屬於 mixFixed 裡的哪一格（固定格或自選格都算）。
+function koFindPartByProductKey(box, productKey) {
+  return box.parts.find(p => p.productKey === productKey || (p.productKeys && p.productKeys.includes(productKey)));
 }
 
 function sumQty(qtyObj) {
@@ -507,10 +467,15 @@ function koComboTotalPrice(box) {
 function koMaxAllowedForFlavor(box, productKey, flavor) {
   const qtyObj = state.koCombo.qty[productKey];
   const current = qtyObj[flavor] || 0;
+  // mixFixed 的自選格（productKeys 好幾種）是共用同一個配額，要把這一格裡所有品項
+  // 目前已選的總數都算進去，不能只看這個 productKey 自己的小計。
   if (box.type === "mixFixed") {
-    const partTarget = koComboTargetForPart(box, productKey);
-    const partSumOthers = sumQty(qtyObj) - current;
-    return Math.max(0, partTarget - partSumOthers);
+    const part = koFindPartByProductKey(box, productKey);
+    if (!part) return 0;
+    const partKeysInThisPart = part.productKey ? [part.productKey] : part.productKeys;
+    const partSumAll = partKeysInThisPart.reduce((sum, k) => sum + sumQty(state.koCombo.qty[k] || {}), 0);
+    const partSumOthers = partSumAll - current;
+    return Math.max(0, part.qty - partSumOthers);
   }
   const overallTarget = koComboOverallTarget(box);
   const overallSumOthers = koComboOverallSelected(box) - current;
@@ -620,15 +585,11 @@ function renderKoBoxDetail() {
   } else if (box.type === "mixFixed") {
     box.parts.forEach((p, idx) => {
       if (p.productKeys) {
-        const activeKey = koPartKey(box, idx);
-        html += `<div class="combo-part-title">第 ${idx + 1} 格（限 ${p.qty} 入）－請先選品項</div>`;
-        html += `<div class="size-chip-row">`;
-        p.productKeys.forEach(k => {
-          const active = activeKey === k ? "active" : "";
-          html += `<button type="button" class="size-chip part-choice-chip ${active}" data-part-idx="${idx}" data-key="${k}">${PRODUCTS[k].name}</button>`;
-        });
-        html += `</div>`;
-        html += renderPartFlavors(activeKey, `${PRODUCTS[activeKey].name}（限 ${p.qty} 入）`);
+        // 自選格：好幾種品項共用同一個配額，全部品項的口味清單都直接列出來，
+        // 自由混搭湊滿這一格的數量即可，不用先選定只用哪一種。
+        const names = p.productKeys.map(k => PRODUCTS[k].name).join("／");
+        html += `<div class="combo-part-title">第 ${idx + 1} 格－自選（${names}），合計限 ${p.qty} 入</div>`;
+        p.productKeys.forEach(k => { html += renderPartFlavors(k); });
       } else {
         html += renderPartFlavors(p.productKey, `${PRODUCTS[p.productKey].name}（限 ${p.qty} 入）`);
       }
@@ -654,12 +615,6 @@ function renderKoBoxDetail() {
       state.koCombo.size = opt.qty;
       Object.keys(state.koCombo.qty).forEach(k => (state.koCombo.qty[k] = {}));
       renderKoBoxDetail();
-    });
-  });
-
-  document.querySelectorAll("#ko-box-detail-body .part-choice-chip").forEach(chip => {
-    chip.addEventListener("click", () => {
-      switchKoPartProduct(box, Number(chip.dataset.partIdx), chip.dataset.key);
     });
   });
 

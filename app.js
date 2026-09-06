@@ -32,7 +32,6 @@ const state = {
     size: null,
     boxQty: 1, // 這個組合要訂購幾盒
     qty: {}, // { productKey: { flavorName: number } }
-    partChoice: {}, // mixFixed 裡「可自選品項」的格子，記錄每一格目前選的是哪個 productKey：{ partIndex: productKey }
     packagingKey: null, // box.packagingOptions 裡目前選的是哪一個（例如「紙盒6入」），沒選就是 null
   },
   cart: [], // 已加入訂單清單的禮盒們：{ boxName, summary, total }
@@ -272,33 +271,17 @@ function findBox(boxId) {
   return COMBOABLE_BOXES.find(b => b.id === boxId);
 }
 
-// mixFixed 的每一格可能是固定品項（part.productKey）或可自選品項（part.productKeys，
-// 還沒選之前預設用陣列第一個）。這個函式統一算出「這一格現在實際代表哪個 productKey」，
-// 讓其他函式都用同一套邏輯，不用到處各自判斷。
-function partKey(box, idx) {
-  const part = box.parts[idx];
-  if (part.productKey) return part.productKey;
-  return (state.combo.partChoice && state.combo.partChoice[idx]) || part.productKeys[0];
-}
-
+// mixFixed 的每一格可能是固定品項（part.productKey，只有一種）或可自選品項
+// （part.productKeys，好幾種可以自由混搭，只要這一格的總數湊滿 part.qty 就好，
+// 不用先選定只用其中一種）。這個函式把一整個 box 展開成所有可能出現的 productKey 清單，
+// 讓其他函式（算總價、算明細…）都能用同一套邏輯遍歷，不用管每個格子內部長怎樣。
 function partKeys(box) {
-  return box.parts.map((p, idx) => partKey(box, idx));
+  return box.parts.flatMap(p => (p.productKey ? [p.productKey] : p.productKeys));
 }
 
 function partDisplayName(part) {
   if (part.productKey) return PRODUCTS[part.productKey].name;
   return part.productKeys.map(k => PRODUCTS[k].name).join("／");
-}
-
-// 切換「可自選品項」那一格要選哪個品項：清掉舊品項的數量（避免變成看不到又還在計算的殘留數字），
-// 重新畫面板讓使用者重新選口味數量。
-function switchPartProduct(box, idx, newKey) {
-  const oldKey = partKey(box, idx);
-  if (oldKey === newKey) return;
-  state.combo.partChoice[idx] = newKey;
-  delete state.combo.qty[oldKey];
-  state.combo.qty[newKey] = {};
-  renderComboDetail();
 }
 
 // 目前選的「包裝」選項（例如 A 禮盒的紙盒／塑膠盒 6 入），沒選就回傳 null。
@@ -315,7 +298,6 @@ function startCombo(boxId) {
   state.combo.size = box.sizes ? box.sizes[0] : null;
   state.combo.boxQty = 1;
   state.combo.qty = {};
-  state.combo.partChoice = {};
   state.combo.packagingKey = null;
 
   if (box.type === "single") {
@@ -330,14 +312,9 @@ function startCombo(boxId) {
   goTo("screen-combo-detail");
 }
 
-function comboTargetForPart(box, productKey) {
-  if (box.type === "single") return state.combo.size;
-  if (box.type === "mixFree") return null; // 由整體 size 控制，非單一品項
-  if (box.type === "mixFixed") {
-    const idx = box.parts.findIndex((p, i) => partKey(box, i) === productKey);
-    return idx !== -1 ? box.parts[idx].qty : 0;
-  }
-  return 0;
+// 找出這個 productKey 屬於 mixFixed 裡的哪一格（固定格或自選格都算）。
+function findPartByProductKey(box, productKey) {
+  return box.parts.find(p => p.productKey === productKey || (p.productKeys && p.productKeys.includes(productKey)));
 }
 
 function sumQty(qtyObj) {
@@ -380,10 +357,16 @@ function maxAllowedForFlavor(box, productKey, flavor) {
   const qtyObj = state.combo.qty[productKey];
   const current = qtyObj[flavor] || 0;
 
+  // mixFixed 的自選格（productKeys 好幾種）是共用同一個配額，所以要把「這一格裡
+  // 所有品項目前已選的總數」都算進去，不能只看這個 productKey 自己的小計，
+  // 不然同一格裡選了兩種品項時，各自都會誤以為自己還有完整的配額可以填。
   if (box.type === "mixFixed") {
-    const partTarget = comboTargetForPart(box, productKey);
-    const partSumOthers = sumQty(qtyObj) - current;
-    return Math.max(0, partTarget - partSumOthers);
+    const part = findPartByProductKey(box, productKey);
+    if (!part) return 0;
+    const partKeysInThisPart = part.productKey ? [part.productKey] : part.productKeys;
+    const partSumAll = partKeysInThisPart.reduce((sum, k) => sum + sumQty(state.combo.qty[k] || {}), 0);
+    const partSumOthers = partSumAll - current;
+    return Math.max(0, part.qty - partSumOthers);
   }
   const overallTarget = comboOverallTarget(box);
   const overallSumOthers = comboOverallSelected(box) - current;
@@ -526,15 +509,13 @@ function renderComboDetail() {
   } else if (box.type === "mixFixed") {
     box.parts.forEach((p, idx) => {
       if (p.productKeys) {
-        const activeKey = partKey(box, idx);
-        html += `<div class="combo-part-title">第 ${idx + 1} 格（限 ${p.qty} 入）－請先選品項</div>`;
-        html += `<div class="size-chip-row">`;
+        // 自選格：好幾種品項共用同一個配額，全部品項的口味清單都直接列出來，
+        // 自由混搭湊滿這一格的數量即可，不用先選定只用哪一種。
+        const names = p.productKeys.map(k => PRODUCTS[k].name).join("／");
+        html += `<div class="combo-part-title">第 ${idx + 1} 格－自選（${names}），合計限 ${p.qty} 入</div>`;
         p.productKeys.forEach(k => {
-          const active = activeKey === k ? "active" : "";
-          html += `<button type="button" class="size-chip part-choice-chip ${active}" data-part-idx="${idx}" data-key="${k}">${PRODUCTS[k].name}</button>`;
+          html += renderPartFlavors(k);
         });
-        html += `</div>`;
-        html += renderPartFlavors(activeKey, `${PRODUCTS[activeKey].name}（限 ${p.qty} 入）`);
       } else {
         html += renderPartFlavors(p.productKey, `${PRODUCTS[p.productKey].name}（限 ${p.qty} 入）`);
       }
@@ -565,13 +546,6 @@ function renderComboDetail() {
       state.combo.size = opt.qty;
       Object.keys(state.combo.qty).forEach(k => (state.combo.qty[k] = {}));
       renderComboDetail();
-    });
-  });
-
-  // 綁定「可自選品項」的品項切換 chip
-  document.querySelectorAll("#combo-detail-body .part-choice-chip").forEach(chip => {
-    chip.addEventListener("click", () => {
-      switchPartProduct(box, Number(chip.dataset.partIdx), chip.dataset.key);
     });
   });
 
