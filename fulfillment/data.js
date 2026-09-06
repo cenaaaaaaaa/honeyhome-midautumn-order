@@ -104,21 +104,21 @@ const MIX_BOXES = [
   },
   {
     id: "B",
-    name: "B．蛋黃酥 6 入＋綠豆椪 4 入",
+    name: "B．蛋黃酥 6 入＋自選 4 入（綠豆椪／水果酥／小月餅）",
     type: "mixFixed",
     parts: [
       { productKey: "danhuangsu", qty: 6 },
-      { productKey: "ludoupeng", qty: 4 },
+      { productKeys: ["ludoupeng", "shuiguosu", "xiaoyuebing"], qty: 4 },
     ],
     img: "../assets/img/mix-b.png",
   },
   {
     id: "C",
-    name: "C．蛋黃酥 8 入＋綠豆椪 6 入",
+    name: "C．蛋黃酥 8 入＋自選 6 入（綠豆椪／水果酥／小月餅）",
     type: "mixFixed",
     parts: [
       { productKey: "danhuangsu", qty: 8 },
-      { productKey: "ludoupeng", qty: 6 },
+      { productKeys: ["ludoupeng", "shuiguosu", "xiaoyuebing"], qty: 6 },
     ],
     img: "../assets/img/mix-c.png",
   },

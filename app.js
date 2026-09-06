@@ -32,6 +32,7 @@ const state = {
     size: null,
     boxQty: 1, // 這個組合要訂購幾盒
     qty: {}, // { productKey: { flavorName: number } }
+    partChoice: {}, // mixFixed 裡「可自選品項」的格子，記錄每一格目前選的是哪個 productKey：{ partIndex: productKey }
   },
   cart: [], // 已加入訂單清單的禮盒們：{ boxName, summary, total }
 };
@@ -175,7 +176,7 @@ function renderBoxGallery() {
     if (box.type === "mixFree") {
       metaText = `共 ${box.sizes.join(" / ")} 顆，${box.productKeys.map(k => PRODUCTS[k].name).join("＋")} 自由搭配`;
     } else {
-      metaText = box.parts.map(p => `${PRODUCTS[p.productKey].name} ${p.qty} 入`).join("＋");
+      metaText = box.parts.map(p => `${partDisplayName(p)} ${p.qty} 入`).join("＋");
     }
     renderCard(box, metaText, "試著組合這款", () => startCombo(box.id), box.pending);
   });
@@ -270,6 +271,35 @@ function findBox(boxId) {
   return COMBOABLE_BOXES.find(b => b.id === boxId);
 }
 
+// mixFixed 的每一格可能是固定品項（part.productKey）或可自選品項（part.productKeys，
+// 還沒選之前預設用陣列第一個）。這個函式統一算出「這一格現在實際代表哪個 productKey」，
+// 讓其他函式都用同一套邏輯，不用到處各自判斷。
+function partKey(box, idx) {
+  const part = box.parts[idx];
+  if (part.productKey) return part.productKey;
+  return (state.combo.partChoice && state.combo.partChoice[idx]) || part.productKeys[0];
+}
+
+function partKeys(box) {
+  return box.parts.map((p, idx) => partKey(box, idx));
+}
+
+function partDisplayName(part) {
+  if (part.productKey) return PRODUCTS[part.productKey].name;
+  return part.productKeys.map(k => PRODUCTS[k].name).join("／");
+}
+
+// 切換「可自選品項」那一格要選哪個品項：清掉舊品項的數量（避免變成看不到又還在計算的殘留數字），
+// 重新畫面板讓使用者重新選口味數量。
+function switchPartProduct(box, idx, newKey) {
+  const oldKey = partKey(box, idx);
+  if (oldKey === newKey) return;
+  state.combo.partChoice[idx] = newKey;
+  delete state.combo.qty[oldKey];
+  state.combo.qty[newKey] = {};
+  renderComboDetail();
+}
+
 function startCombo(boxId) {
   const box = findBox(boxId);
   if (!box) return;
@@ -278,13 +308,14 @@ function startCombo(boxId) {
   state.combo.size = box.sizes ? box.sizes[0] : null;
   state.combo.boxQty = 1;
   state.combo.qty = {};
+  state.combo.partChoice = {};
 
   if (box.type === "single") {
     state.combo.qty[box.productKey] = {};
   } else if (box.type === "mixFree") {
     box.productKeys.forEach(k => (state.combo.qty[k] = {}));
   } else if (box.type === "mixFixed") {
-    box.parts.forEach(p => (state.combo.qty[p.productKey] = {}));
+    partKeys(box).forEach(k => (state.combo.qty[k] = {}));
   }
 
   renderComboDetail();
@@ -295,8 +326,8 @@ function comboTargetForPart(box, productKey) {
   if (box.type === "single") return state.combo.size;
   if (box.type === "mixFree") return null; // 由整體 size 控制，非單一品項
   if (box.type === "mixFixed") {
-    const part = box.parts.find(p => p.productKey === productKey);
-    return part ? part.qty : 0;
+    const idx = box.parts.findIndex((p, i) => partKey(box, i) === productKey);
+    return idx !== -1 ? box.parts[idx].qty : 0;
   }
   return 0;
 }
@@ -323,7 +354,7 @@ function comboOverallSelected(box) {
 function comboTotalPrice(box) {
   if (box.type === "fixed") return box.price;
   let total = 0;
-  const keys = box.type === "single" ? [box.productKey] : box.type === "mixFree" ? box.productKeys : box.parts.map(p => p.productKey);
+  const keys = box.type === "single" ? [box.productKey] : box.type === "mixFree" ? box.productKeys : partKeys(box);
   keys.forEach(k => {
     const product = PRODUCTS[k];
     if (!product || product.pending) return;
@@ -478,8 +509,20 @@ function renderComboDetail() {
       html += renderPartFlavors(k);
     });
   } else if (box.type === "mixFixed") {
-    box.parts.forEach(p => {
-      html += renderPartFlavors(p.productKey, `${PRODUCTS[p.productKey].name}（限 ${p.qty} 入）`);
+    box.parts.forEach((p, idx) => {
+      if (p.productKeys) {
+        const activeKey = partKey(box, idx);
+        html += `<div class="combo-part-title">第 ${idx + 1} 格（限 ${p.qty} 入）－請先選品項</div>`;
+        html += `<div class="size-chip-row">`;
+        p.productKeys.forEach(k => {
+          const active = activeKey === k ? "active" : "";
+          html += `<button type="button" class="size-chip part-choice-chip ${active}" data-part-idx="${idx}" data-key="${k}">${PRODUCTS[k].name}</button>`;
+        });
+        html += `</div>`;
+        html += renderPartFlavors(activeKey, `${PRODUCTS[activeKey].name}（限 ${p.qty} 入）`);
+      } else {
+        html += renderPartFlavors(p.productKey, `${PRODUCTS[p.productKey].name}（限 ${p.qty} 入）`);
+      }
     });
   } else if (box.type === "fixed") {
     html += `<p style="color:var(--ink-soft);font-size:14px;">這款是整盒固定內容（${box.size}），沒有口味可以調整，直接選擇要訂購幾盒就可以囉。</p>`;
@@ -487,13 +530,20 @@ function renderComboDetail() {
 
   document.getElementById("combo-detail-body").innerHTML = html;
 
-  // 綁定尺寸切換
-  document.querySelectorAll(".size-chip").forEach(chip => {
+  // 綁定尺寸切換（用 [data-size] 限定，避免跟下面「可自選品項」的 chip 選到同一顆 class 卻誤觸尺寸邏輯）
+  document.querySelectorAll("#combo-detail-body .size-chip[data-size]").forEach(chip => {
     chip.addEventListener("click", () => {
       state.combo.size = Number(chip.dataset.size);
       // 尺寸變更時，數量歸零避免超過新上限造成混亂
       Object.keys(state.combo.qty).forEach(k => (state.combo.qty[k] = {}));
       renderComboDetail();
+    });
+  });
+
+  // 綁定「可自選品項」的品項切換 chip
+  document.querySelectorAll("#combo-detail-body .part-choice-chip").forEach(chip => {
+    chip.addEventListener("click", () => {
+      switchPartProduct(box, Number(chip.dataset.partIdx), chip.dataset.key);
     });
   });
 
@@ -568,7 +618,7 @@ function comboSummaryText(box) {
   if (box.type === "fixed") {
     lines.push(`內容：${box.size}，整盒固定內容`);
   } else {
-    const keys = box.type === "single" ? [box.productKey] : box.type === "mixFree" ? box.productKeys : box.parts.map(p => p.productKey);
+    const keys = box.type === "single" ? [box.productKey] : box.type === "mixFree" ? box.productKeys : partKeys(box);
     keys.forEach(k => {
       const product = PRODUCTS[k];
       const qtyObj = state.combo.qty[k] || {};
@@ -589,7 +639,7 @@ function comboStructured(box) {
   if (box.type === "fixed") {
     return [{ productKey: box.id, productName: box.name, flavors: [{ flavor: `整盒（${box.size}）`, qty: 1 }] }];
   }
-  const keys = box.type === "single" ? [box.productKey] : box.type === "mixFree" ? box.productKeys : box.parts.map(p => p.productKey);
+  const keys = box.type === "single" ? [box.productKey] : box.type === "mixFree" ? box.productKeys : partKeys(box);
   return keys.map(k => {
     const qtyObj = state.combo.qty[k] || {};
     const flavors = Object.entries(qtyObj)
