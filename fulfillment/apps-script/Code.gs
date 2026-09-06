@@ -180,6 +180,9 @@ function addManualOrder_(order) {
     boxName: b.boxName || "",
     size: b.size || null,
     boxQty: b.boxQty || 1,
+    packagingKey: b.packagingKey || null,
+    packagingLabel: b.packagingLabel || null,
+    packagingFee: b.packagingFee || 0,
     lines: Array.isArray(b.lines) ? b.lines : [],
     done: false,
   }));
@@ -222,6 +225,9 @@ function updateOrder_(orderId, order) {
     boxName: b.boxName || "",
     size: b.size || null,
     boxQty: b.boxQty || 1,
+    packagingKey: b.packagingKey || null,
+    packagingLabel: b.packagingLabel || null,
+    packagingFee: b.packagingFee || 0,
     lines: Array.isArray(b.lines) ? b.lines : [],
     done: false,
   }));
@@ -420,7 +426,16 @@ function groupedBoxesFromDetailJson_(raw) {
           lines.push({ productName: item.productName, flavor: f.flavor, qty: (f.qty || 0) * boxQty });
         });
       });
-      return { boxName: box.boxName || "", size: box.size || null, boxQty: boxQty, lines: lines, done: false };
+      return {
+        boxName: box.boxName || "",
+        size: box.size || null,
+        boxQty: boxQty,
+        packagingKey: box.packagingKey || null,
+        packagingLabel: box.packagingLabel || null,
+        packagingFee: box.packagingFee || 0,
+        lines: lines,
+        done: false,
+      };
     });
   } catch (err) {
     return [];

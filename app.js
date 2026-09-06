@@ -33,6 +33,7 @@ const state = {
     boxQty: 1, // 這個組合要訂購幾盒
     qty: {}, // { productKey: { flavorName: number } }
     partChoice: {}, // mixFixed 裡「可自選品項」的格子，記錄每一格目前選的是哪個 productKey：{ partIndex: productKey }
+    packagingKey: null, // box.packagingOptions 裡目前選的是哪一個（例如「紙盒6入」），沒選就是 null
   },
   cart: [], // 已加入訂單清單的禮盒們：{ boxName, summary, total }
 };
@@ -300,6 +301,12 @@ function switchPartProduct(box, idx, newKey) {
   renderComboDetail();
 }
 
+// 目前選的「包裝」選項（例如 A 禮盒的紙盒／塑膠盒 6 入），沒選就回傳 null。
+function activePackaging(box) {
+  if (!box.packagingOptions || !state.combo.packagingKey) return null;
+  return box.packagingOptions.find(o => o.key === state.combo.packagingKey) || null;
+}
+
 function startCombo(boxId) {
   const box = findBox(boxId);
   if (!box) return;
@@ -309,6 +316,7 @@ function startCombo(boxId) {
   state.combo.boxQty = 1;
   state.combo.qty = {};
   state.combo.partChoice = {};
+  state.combo.packagingKey = null;
 
   if (box.type === "single") {
     state.combo.qty[box.productKey] = {};
@@ -362,6 +370,8 @@ function comboTotalPrice(box) {
     const count = sumQty(qtyObj);
     total += count * product.price;
   });
+  const pkg = activePackaging(box);
+  if (pkg) total += pkg.extraFee;
   return total;
 }
 
@@ -472,11 +482,16 @@ function renderComboDetail() {
   let html = "";
 
   // 尺寸選擇（single / mixFree 才有）
-  if (box.sizes) {
+  if (box.sizes || box.packagingOptions) {
     html += `<div class="size-chip-row">`;
-    box.sizes.forEach(sz => {
-      const active = state.combo.size === sz ? "active" : "";
+    (box.sizes || []).forEach(sz => {
+      const active = state.combo.size === sz && !state.combo.packagingKey ? "active" : "";
       html += `<button class="size-chip ${active}" data-size="${sz}">${sz} 入</button>`;
+    });
+    // 額外的包裝選項（例如紙盒／塑膠盒 6 入），跟上面的份量選項是同一排、互斥的選擇。
+    (box.packagingOptions || []).forEach(opt => {
+      const active = state.combo.packagingKey === opt.key ? "active" : "";
+      html += `<button type="button" class="size-chip packaging-chip ${active}" data-packaging-key="${opt.key}">${opt.label}${opt.extraFee ? `（+$${opt.extraFee}）` : ""}</button>`;
     });
     html += `</div>`;
   }
@@ -534,7 +549,20 @@ function renderComboDetail() {
   document.querySelectorAll("#combo-detail-body .size-chip[data-size]").forEach(chip => {
     chip.addEventListener("click", () => {
       state.combo.size = Number(chip.dataset.size);
+      state.combo.packagingKey = null; // 選了一般份量，包裝選項（若有）就取消
       // 尺寸變更時，數量歸零避免超過新上限造成混亂
+      Object.keys(state.combo.qty).forEach(k => (state.combo.qty[k] = {}));
+      renderComboDetail();
+    });
+  });
+
+  // 綁定包裝選項切換（例如紙盒／塑膠盒 6 入）
+  document.querySelectorAll("#combo-detail-body .packaging-chip").forEach(chip => {
+    chip.addEventListener("click", () => {
+      const opt = (box.packagingOptions || []).find(o => o.key === chip.dataset.packagingKey);
+      if (!opt) return;
+      state.combo.packagingKey = opt.key;
+      state.combo.size = opt.qty;
       Object.keys(state.combo.qty).forEach(k => (state.combo.qty[k] = {}));
       renderComboDetail();
     });
@@ -612,7 +640,12 @@ function comboSummaryText(box) {
 
   let lines = [];
   lines.push(`禮盒：${box.name}`);
-  if (state.combo.size) lines.push(`份量：${state.combo.size} 入`);
+  const pkg = activePackaging(box);
+  if (pkg) {
+    lines.push(`份量／包裝：${pkg.label}`);
+  } else if (state.combo.size) {
+    lines.push(`份量：${state.combo.size} 入`);
+  }
   if (boxQty > 1) lines.push(`訂購盒數：${boxQty} 盒`);
 
   if (box.type === "fixed") {
@@ -656,11 +689,15 @@ function cartGrandTotal() {
 
 function addCurrentToCart() {
   const box = findBox(state.combo.boxId);
+  const pkg = activePackaging(box);
   state.cart.push({
     boxName: box.name,
     boxId: box.id,
     size: state.combo.size,
     boxQty: state.combo.boxQty,
+    packagingKey: pkg ? pkg.key : null,
+    packagingLabel: pkg ? pkg.label : null,
+    packagingFee: pkg ? pkg.extraFee : 0,
     summary: comboSummaryText(box),
     items: comboStructured(box),
     total: comboTotalPrice(box) * state.combo.boxQty,
@@ -761,6 +798,9 @@ function submitOrder(e) {
       boxId: item.boxId,
       size: item.size,
       boxQty: item.boxQty,
+      packagingKey: item.packagingKey || null,
+      packagingLabel: item.packagingLabel || null,
+      packagingFee: item.packagingFee || 0,
       items: item.items,
       total: item.total,
     })),

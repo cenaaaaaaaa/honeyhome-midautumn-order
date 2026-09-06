@@ -11,7 +11,7 @@ const state = {
   viewMode: "calendar", // calendar | list
   currentDetailId: null,
   // key 訂單用：目前正在挑選中的禮盒（跟訂購網頁「自己組合看看」邏輯一樣）
-  koCombo: { boxId: null, size: null, boxQty: 1, qty: {}, partChoice: {} },
+  koCombo: { boxId: null, size: null, boxQty: 1, qty: {}, partChoice: {}, packagingKey: null },
   // key 訂單用：這張訂單目前已經加入的禮盒品項清單
   koCart: [],
   // 有值代表現在是「點進購物車裡某一項，修改內容」，而不是新增一個全新品項，
@@ -198,7 +198,7 @@ function initMenuScreen() {
 
 function resetKeyOrderFlow() {
   state.koCart = [];
-  state.koCombo = { boxId: null, size: null, boxQty: 1, qty: {}, partChoice: {} };
+  state.koCombo = { boxId: null, size: null, boxQty: 1, qty: {}, partChoice: {}, packagingKey: null };
   state.koCartEditIndex = null;
   state.koEditOrderId = null;
   state.koEditOriginal = null;
@@ -215,6 +215,9 @@ function boxesToKoCart(order) {
       boxId: matched ? matched.id : null,
       size: box.size || null,
       boxQty: box.boxQty || 1,
+      packagingKey: box.packagingKey || null,
+      packagingLabel: box.packagingLabel || null,
+      packagingFee: box.packagingFee || 0,
       lines: Array.isArray(box.lines) ? box.lines : [],
       summary: koRebuildSummaryFromBox(box),
       total: koEstimateBoxTotal(box),
@@ -224,7 +227,11 @@ function boxesToKoCart(order) {
 
 function koRebuildSummaryFromBox(box) {
   const lines = [`禮盒：${box.boxName || "（未命名）"}`];
-  if (box.size) lines.push(`份量：${box.size} 入`);
+  if (box.packagingLabel) {
+    lines.push(`份量／包裝：${box.packagingLabel}`);
+  } else if (box.size) {
+    lines.push(`份量：${box.size} 入`);
+  }
   if (box.boxQty > 1) lines.push(`訂購盒數：${box.boxQty} 盒`);
   (box.lines || []).forEach(l => lines.push(`${l.productName}：${l.flavor} x${l.qty}`));
   return lines.join("\n");
@@ -233,7 +240,7 @@ function koRebuildSummaryFromBox(box) {
 // 用品名回頭去 PRODUCTS / FIXED_BOXES 查單價，估出這個品項的小計，
 // 純粹是購物車畫面上的參考金額，不是送出時真正採用的總金額（總金額那格永遠是手動填寫的欄位）。
 function koEstimateBoxTotal(box) {
-  let sum = 0;
+  let sum = box.packagingFee || 0;
   (box.lines || []).forEach(l => {
     const product = Object.values(PRODUCTS).find(p => p.name === l.productName);
     if (product) { sum += (product.price || 0) * (l.qty || 0); return; }
@@ -248,7 +255,7 @@ function startEditOrder(order) {
   state.koEditOrderId = order["訂單ID"];
   state.koEditOriginal = order;
   state.koCart = boxesToKoCart(order);
-  state.koCombo = { boxId: null, size: null, boxQty: 1, qty: {} };
+  state.koCombo = { boxId: null, size: null, boxQty: 1, qty: {}, partChoice: {}, packagingKey: null };
   goToMenuDirect();
   goTo("screen-key-order");
   renderKoCart();
@@ -349,6 +356,12 @@ function switchKoPartProduct(box, idx, newKey) {
   renderKoBoxDetail();
 }
 
+// 目前選的「包裝」選項（例如 A 禮盒的紙盒／塑膠盒 6 入），沒選就回傳 null。
+function koActivePackaging(box) {
+  if (!box.packagingOptions || !state.koCombo.packagingKey) return null;
+  return box.packagingOptions.find(o => o.key === state.koCombo.packagingKey) || null;
+}
+
 // 編輯購物車既有品項時，從它存下來的 lines（品名＋口味＋數量）反推「可自選品項」那格
 // 當初選的是哪個 productKey，才能正確灌回 state.koCombo，而不是每次都預設回第一個選項。
 function inferKoPartChoicesFromLines(box, lines) {
@@ -407,6 +420,7 @@ function startKoBox(boxId) {
   state.koCombo.size = box.sizes ? box.sizes[0] : null;
   state.koCombo.boxQty = 1;
   state.koCombo.partChoice = {};
+  state.koCombo.packagingKey = null;
   initKoComboQtyStructure(box);
 
   renderKoBoxDetail();
@@ -428,6 +442,7 @@ function startEditKoCartItem(idx) {
   state.koCombo.size = item.size || (box.sizes ? box.sizes[0] : null);
   state.koCombo.boxQty = item.boxQty || 1;
   state.koCombo.partChoice = inferKoPartChoicesFromLines(box, item.lines);
+  state.koCombo.packagingKey = item.packagingKey || null;
   initKoComboQtyStructure(box);
 
   // lines 裡的 qty 是已經乘過 boxQty 的，要除回「每盒」的數量才能灌回 qty 選擇器。
@@ -484,6 +499,8 @@ function koComboTotalPrice(box) {
     const qtyObj = state.koCombo.qty[k] || {};
     total += sumQty(qtyObj) * product.price;
   });
+  const pkg = koActivePackaging(box);
+  if (pkg) total += pkg.extraFee;
   return total;
 }
 
@@ -562,11 +579,15 @@ function renderKoBoxDetail() {
   }
 
   let html = "";
-  if (box.sizes) {
+  if (box.sizes || box.packagingOptions) {
     html += `<div class="size-chip-row">`;
-    box.sizes.forEach(sz => {
-      const active = state.koCombo.size === sz ? "active" : "";
+    (box.sizes || []).forEach(sz => {
+      const active = state.koCombo.size === sz && !state.koCombo.packagingKey ? "active" : "";
       html += `<button class="size-chip ${active}" data-size="${sz}">${sz} 入</button>`;
+    });
+    (box.packagingOptions || []).forEach(opt => {
+      const active = state.koCombo.packagingKey === opt.key ? "active" : "";
+      html += `<button type="button" class="size-chip packaging-chip ${active}" data-packaging-key="${opt.key}">${opt.label}${opt.extraFee ? `（+$${opt.extraFee}）` : ""}</button>`;
     });
     html += `</div>`;
   }
@@ -619,6 +640,18 @@ function renderKoBoxDetail() {
   document.querySelectorAll("#ko-box-detail-body .size-chip[data-size]").forEach(chip => {
     chip.addEventListener("click", () => {
       state.koCombo.size = Number(chip.dataset.size);
+      state.koCombo.packagingKey = null;
+      Object.keys(state.koCombo.qty).forEach(k => (state.koCombo.qty[k] = {}));
+      renderKoBoxDetail();
+    });
+  });
+
+  document.querySelectorAll("#ko-box-detail-body .packaging-chip").forEach(chip => {
+    chip.addEventListener("click", () => {
+      const opt = (box.packagingOptions || []).find(o => o.key === chip.dataset.packagingKey);
+      if (!opt) return;
+      state.koCombo.packagingKey = opt.key;
+      state.koCombo.size = opt.qty;
       Object.keys(state.koCombo.qty).forEach(k => (state.koCombo.qty[k] = {}));
       renderKoBoxDetail();
     });
@@ -699,7 +732,12 @@ function koComboSummaryText(box) {
   const boxQty = state.koCombo.boxQty;
   const perBoxTotal = koComboTotalPrice(box);
   let lines = [`禮盒：${box.name}`];
-  if (box.type !== "fixed" && state.koCombo.size) lines.push(`份量：${state.koCombo.size} 入`);
+  const pkg = koActivePackaging(box);
+  if (pkg) {
+    lines.push(`份量／包裝：${pkg.label}`);
+  } else if (box.type !== "fixed" && state.koCombo.size) {
+    lines.push(`份量：${state.koCombo.size} 入`);
+  }
   if (boxQty > 1) lines.push(`訂購盒數：${boxQty} 盒`);
 
   koComboStructured(box).forEach(item => {
@@ -729,11 +767,15 @@ function initKoBoxDetailScreen() {
     const box = findKoBox(state.koCombo.boxId);
     if (!box) return;
     const boxQty = box.type === "fixed" ? state.koCombo.boxQty : state.koCombo.boxQty;
+    const pkg = koActivePackaging(box);
     const cartItem = {
       boxName: box.name,
       boxId: box.id,
       size: box.type === "fixed" ? null : state.koCombo.size,
       boxQty,
+      packagingKey: pkg ? pkg.key : null,
+      packagingLabel: pkg ? pkg.label : null,
+      packagingFee: pkg ? pkg.extraFee : 0,
       summary: koComboSummaryText(box),
       lines: koComboStructured(box).map(item => ({ ...item, qty: item.qty * boxQty })),
       total: koComboTotalPrice(box) * boxQty,
@@ -832,6 +874,9 @@ async function submitKeyOrder(e) {
     boxName: item.boxName,
     size: item.size,
     boxQty: item.boxQty,
+    packagingKey: item.packagingKey || null,
+    packagingLabel: item.packagingLabel || null,
+    packagingFee: item.packagingFee || 0,
     lines: item.lines,
   }));
   const pickupDate = document.getElementById("ko-pickup-date").value;
@@ -1103,7 +1148,11 @@ function renderOrderDetail() {
     boxesHtml = boxes.map((box, idx) => {
       const boxDone = !!box.done;
       const titleParts = [box.boxName || "（未命名品項）"];
-      if (box.size) titleParts.push(box.size);
+      if (box.packagingLabel) {
+        titleParts.push(box.packagingLabel);
+      } else if (box.size) {
+        titleParts.push(box.size);
+      }
       if (box.boxQty > 1) titleParts.push(`${box.boxQty} 盒`);
       const linesHtml = (box.lines || [])
         .map(l => `<div class="detail-row"><span class="k">${l.productName}｜${l.flavor}</span><span class="v">${l.qty}</span></div>`)
