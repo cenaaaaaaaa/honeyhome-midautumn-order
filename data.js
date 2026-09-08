@@ -103,10 +103,10 @@ const SINGLE_BOXES = [
 const MIX_BOXES = [
   {
     id: "A",
-    name: "A．蛋黃酥＋水果酥 綜合禮盒",
+    name: "A．蛋黃酥＋水果酥＋小月餅 綜合禮盒",
     type: "mixFree", // 自由分配口味，湊滿選定顆數即可
-    productKeys: ["danhuangsu", "shuiguosu"],
-    sizes: [12, 15, 20],
+    productKeys: ["danhuangsu", "shuiguosu", "xiaoyuebing"],
+    sizes: [10, 12, 15, 20],
     // 6 入另外有兩種包裝可選：塑膠盒（原價）／紙盒（+$20 紙盒錢）。
     // 跟 sizes 是同一排「份量」選項的延伸，選了其中一個包裝，size 會自動變成 6。
     packagingOptions: [
@@ -120,8 +120,8 @@ const MIX_BOXES = [
     name: "B．自選 6 入（蛋黃酥／水果酥／小月餅）＋綠豆椪 4 入",
     type: "mixFixed", // 每個品項數量固定，口味在各自數量內自由選
     parts: [
-      // productKeys（複數）代表這一格可以三選一先選品項，再選口味，
-      // 跟 productKey（單數）的固定格不一樣，渲染/計算邏輯見 app.js 的 partKey()。
+      // productKeys（複數）代表這一格是自選格，好幾種品項可以自由混搭湊滿這一格的份量，
+      // 跟 productKey（單數）的固定格不一樣，渲染/計算邏輯見 app.js 的 partKeys()。
       { productKeys: ["danhuangsu", "shuiguosu", "xiaoyuebing"], qty: 6 },
       { productKey: "ludoupeng", qty: 4 },
     ],
@@ -136,14 +136,6 @@ const MIX_BOXES = [
       { productKey: "ludoupeng", qty: 6 },
     ],
     img: "assets/img/mix-c.png",
-  },
-  {
-    id: "D",
-    name: "D．蛋黃酥＋水果酥＋小月餅 綜合禮盒",
-    type: "mixFree",
-    productKeys: ["danhuangsu", "shuiguosu", "xiaoyuebing"],
-    sizes: [12, 15, 20],
-    img: "assets/img/mix-d.png",
   },
 ];
 

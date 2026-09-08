@@ -96,10 +96,10 @@ const SINGLE_BOXES = [
 const MIX_BOXES = [
   {
     id: "A",
-    name: "A．蛋黃酥＋水果酥 綜合禮盒",
+    name: "A．蛋黃酥＋水果酥＋小月餅 綜合禮盒",
     type: "mixFree",
-    productKeys: ["danhuangsu", "shuiguosu"],
-    sizes: [12, 15, 20],
+    productKeys: ["danhuangsu", "shuiguosu", "xiaoyuebing"],
+    sizes: [10, 12, 15, 20],
     packagingOptions: [
       { key: "paper6", label: "紙盒 6 入", qty: 6, extraFee: 20 },
       { key: "plastic6", label: "塑膠盒 6 入", qty: 6, extraFee: 0 },
@@ -125,14 +125,6 @@ const MIX_BOXES = [
       { productKey: "ludoupeng", qty: 6 },
     ],
     img: "../assets/img/mix-c.png",
-  },
-  {
-    id: "D",
-    name: "D．蛋黃酥＋水果酥＋小月餅 綜合禮盒",
-    type: "mixFree",
-    productKeys: ["danhuangsu", "shuiguosu", "xiaoyuebing"],
-    sizes: [12, 15, 20],
-    img: "../assets/img/mix-d.png",
   },
 ];
 
