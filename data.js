@@ -80,7 +80,7 @@ const SINGLE_BOXES = [
     id: "danhuangsu-box",
     name: "蛋黃酥禮盒",
     productKey: "danhuangsu",
-    sizes: [12, 15, 20],
+    sizes: [10, 12, 15, 20],
     img: "assets/img/danhuangsu-box.png",
   },
   {
