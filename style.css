@@ -476,6 +476,13 @@ body {
   box-shadow: 0 2px 8px rgba(60, 40, 20, 0.06);
 }
 
+/* 特別強調的區塊（例如「訂購幾盒」），用金黃色跟一般口味列做出對比，避免漏填 */
+.flavor-row.highlight-gold {
+  background: #fff4d6;
+  border: 1.5px solid #e8b23d;
+  box-shadow: 0 2px 10px rgba(232, 178, 61, 0.28);
+}
+
 .flavor-row .fname {
   font-size: 15px;
 }
