@@ -3,6 +3,11 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<!-- 告訴瀏覽器不要快取這個頁面本身，每次都重新跟伺服器要最新版本，
+     這樣以後改完程式碼，手機打開不會再看到舊畫面，不用再用私密瀏覽確認 -->
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+<meta http-equiv="Pragma" content="no-cache" />
+<meta http-equiv="Expires" content="0" />
 <title>巧家麵包店｜中秋禮盒互動訂購</title>
 <!-- 每次改 style.css，把下面這個 ?v= 數字 +1，避免瀏覽器一直用舊的快取版本 -->
 <link rel="stylesheet" href="style.css?v=2" />
