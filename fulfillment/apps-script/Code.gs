@@ -44,6 +44,7 @@ function doGet(e) {
     if (params.action === "orders" || !params.action) {
       syncFormOrders_();
       backfillBoxes_();
+      fixUnmultipliedQtyOnce_();
       const orders = readShipOrders_();
       return jsonOut_({ ok: true, orders });
     }
@@ -481,7 +482,11 @@ function parseSummaryBoxes_(summaryText) {
       });
     });
 
-    return { boxName: boxName, size: size, boxQty: boxQty, lines: lines, done: false };
+    // 上面解析出來的 lines 數量是「每一盒」的量（跟畫面上顯示的文字一致），
+    // 要乘上訂購盒數才是這個品項實際要準備的總數，不然客人訂好幾盒時備料會少算。
+    const totalLines = lines.map(l => ({ ...l, qty: l.qty * boxQty }));
+
+    return { boxName: boxName, size: size, boxQty: boxQty, lines: totalLines, done: false };
   }).filter(box => box.lines.length || box.boxName);
 }
 
@@ -515,6 +520,56 @@ function backfillBoxes_() {
       sheet.getRange(i + 1, detailCol + 1).setValue(JSON.stringify({ boxes: newBoxes, raw: parsed.raw }));
     }
   }
+}
+
+// 一次性修正（2026-09-15 發現的 bug）：在這之前，parseSummaryBoxes_() 沒有把每個口味的
+// 數量乘上「訂購盒數」，導致客人訂好幾盒的訂單，品項明細只算了一盒的量，
+// 「查看每日訂單」的備料加總因此比實際少。這個函式只會真的執行一次（用指令碼屬性記錄
+// 有沒有跑過），不會每次讀取都重跑：一來已經修正過的資料不用再重算，二來如果家人已經
+// 用「編輯這張訂單」手動修過某張單，這裡也不去動它，避免蓋掉手動修改的內容。
+function fixUnmultipliedQtyOnce_() {
+  const props = PropertiesService.getScriptProperties();
+  const FLAG = "fixedQtyMultiplication20260915";
+  if (props.getProperty(FLAG) === "done") return;
+
+  const sheet = getShipSheet_();
+  const range = sheet.getDataRange().getValues();
+  if (range.length < 2) {
+    props.setProperty(FLAG, "done");
+    return;
+  }
+  const headers = range[0];
+  const detailCol = headers.indexOf("品項明細JSON");
+  const srcCol = headers.indexOf("來源");
+  const modByCol = headers.indexOf("最後修改人");
+  if (detailCol === -1) {
+    props.setProperty(FLAG, "done");
+    return;
+  }
+
+  for (let i = 1; i < range.length; i++) {
+    if (range[i][srcCol] !== "customer_form") continue;
+    if (modByCol !== -1 && range[i][modByCol]) continue; // 家人已手動編輯過，不動它
+
+    const raw = range[i][detailCol];
+    if (!raw) continue;
+    let parsed;
+    try {
+      parsed = JSON.parse(raw);
+    } catch (err) {
+      continue;
+    }
+    if (!parsed.raw) continue; // 沒有原始文字，沒辦法重新正確解析
+
+    // 用修好的 parseSummaryBoxes_ 從保留下來的原始文字重新解析一次，
+    // 數量一律以 raw 重新算出的結果為準，直接覆蓋掉舊的（可能算錯的）boxes。
+    const fixedBoxes = parseSummaryBoxes_(parsed.raw);
+    if (fixedBoxes.length) {
+      sheet.getRange(i + 1, detailCol + 1).setValue(JSON.stringify({ boxes: fixedBoxes, raw: parsed.raw }));
+    }
+  }
+
+  props.setProperty(FLAG, "done");
 }
 
 function findFormResponseSheet_() {

@@ -225,12 +225,20 @@ function boxesToKoCart(order) {
   });
 }
 
+// box.size 有兩種來源格式：手動 key 訂單存的是純數字（例如 6），
+// 客人網頁訂單文字解析出來的是已經帶「入」字的字串（例如 "10 入"），
+// 統一正規化成同樣的顯示格式，不然其中一種會漏字、另一種會重複「入 入」。
+function formatSizeText(size) {
+  const sizeText = String(size);
+  return /入\s*$/.test(sizeText) ? sizeText : `${sizeText} 入`;
+}
+
 function koRebuildSummaryFromBox(box) {
   const lines = [`禮盒：${box.boxName || "（未命名）"}`];
   if (box.packagingLabel) {
     lines.push(`份量／包裝：${box.packagingLabel}`);
   } else if (box.size) {
-    lines.push(`份量：${box.size} 入`);
+    lines.push(`份量：${formatSizeText(box.size)}`);
   }
   if (box.boxQty > 1) lines.push(`訂購盒數：${box.boxQty} 盒`);
   (box.lines || []).forEach(l => lines.push(`${l.productName}：${l.flavor} x${l.qty}`));
@@ -1106,7 +1114,7 @@ function renderOrderDetail() {
       if (box.packagingLabel) {
         titleParts.push(box.packagingLabel);
       } else if (box.size) {
-        titleParts.push(box.size);
+        titleParts.push(formatSizeText(box.size));
       }
       if (box.boxQty > 1) titleParts.push(`${box.boxQty} 盒`);
       const linesHtml = (box.lines || [])
