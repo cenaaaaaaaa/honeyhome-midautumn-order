@@ -32,6 +32,7 @@ const SHIP_HEADERS = [
   "品項明細JSON", "總金額", "備註", "出貨狀態",
   "建立時間", "完成人", "完成時間", "刪除人", "刪除時間",
   "最後修改人", "最後修改時間",
+  "運費",
 ];
 
 // ---------- 入口：GET（讀取訂單清單） ----------
@@ -84,6 +85,11 @@ function doPost(e) {
 
     if (body.action === "updateBoxStatus") {
       updateBoxStatus_(body.orderId, body.boxIndex, body.done);
+      return jsonOut_({ ok: true });
+    }
+
+    if (body.action === "updateShippingFee") {
+      updateShippingFee_(body.orderId, body.shippingFee, body.operator);
       return jsonOut_({ ok: true });
     }
 
@@ -329,6 +335,23 @@ function updateBoxStatus_(orderId, boxIndex, done) {
   }
   detail.boxes[boxIndex].done = !!done;
   cell.setValue(JSON.stringify(detail));
+}
+
+// 郵寄訂單常常要等實際寄出、量出郵局收多少運費之後才知道，沒辦法在建立訂單當下就填好，
+// 所以獨立成一個很輕量的動作：只改「運費」這一格，不會像 updateOrder_ 一樣把整張訂單的
+// 出貨狀態重設回未處理（運費不是訂單內容變了，只是補一個之前還不知道的費用）。
+function updateShippingFee_(orderId, shippingFee, operator) {
+  const fee = Number(shippingFee);
+  if (isNaN(fee) || fee < 0) throw new Error("運費金額不對");
+
+  const sheet = getShipSheet_();
+  const { rowNum, headers } = findShipRow_(sheet, orderId);
+  const idx = {};
+  headers.forEach((h, i) => { idx[h] = i; });
+
+  if (idx["運費"] != null) sheet.getRange(rowNum, idx["運費"] + 1).setValue(fee);
+  if (idx["最後修改人"] != null) sheet.getRange(rowNum, idx["最後修改人"] + 1).setValue(operator || "");
+  if (idx["最後修改時間"] != null) sheet.getRange(rowNum, idx["最後修改時間"] + 1).setValue(new Date());
 }
 
 // ---------- 同步：把客人網頁下的新訂單，從表單回應表搬一份進出貨管理 ----------

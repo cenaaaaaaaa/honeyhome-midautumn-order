@@ -1147,13 +1147,42 @@ function renderOrderDetail() {
     ["備註", order["備註"]],
   ].filter(([, v]) => v);
 
+  // 郵寄訂單常常要等實際寄出、量出郵局收多少運費才知道，沒辦法在建立訂單當下就填，
+  // 所以獨立出一塊可以隨時回來補填／修改的區塊，填了才會多顯示「商品金額＋運費」的應收總額。
+  let shippingFeeHtml = "";
+  if (order["取貨方式"] === "郵寄") {
+    const fee = order["運費"];
+    const hasFee = fee !== "" && fee != null;
+    const feeNum = Number(fee) || 0;
+    const grandTotal = (Number(order["總金額"]) || 0) + feeNum;
+    shippingFeeHtml = `
+      <div class="section-title">運費（郵寄）</div>
+      <div class="detail-row"><span class="k">運費</span><span class="v">${hasFee ? `$${feeNum}` : "尚未填寫"}</span></div>
+      ${hasFee ? `<div class="detail-row"><span class="k">商品金額＋運費</span><span class="v">$${grandTotal}</span></div>` : ""}
+      <div class="field" style="margin-top:8px;">
+        <label>${hasFee ? "修改運費" : "填寫運費"}</label>
+        <input type="number" inputmode="numeric" min="0" step="1" id="order-shipping-fee-input" value="${hasFee ? feeNum : ""}" placeholder="例如 80">
+      </div>
+      <button type="button" id="order-shipping-fee-save" class="ghost-btn" style="width:100%;margin-top:6px;">儲存運費</button>
+    `;
+  }
+
   body.innerHTML =
     rows.map(([k, v]) => `<div class="detail-row"><span class="k">${k}</span><span class="v">${v}</span></div>`).join("") +
+    shippingFeeHtml +
     `<div class="section-title">品項明細（${boxes.length || 0} 項）</div>${boxesHtml}`;
 
   body.querySelectorAll(".box-toggle-btn").forEach(btn => {
     btn.addEventListener("click", () => toggleBoxStatus(order, Number(btn.dataset.boxIndex)));
   });
+
+  const feeSaveBtn = document.getElementById("order-shipping-fee-save");
+  if (feeSaveBtn) {
+    feeSaveBtn.addEventListener("click", () => {
+      const input = document.getElementById("order-shipping-fee-input");
+      saveShippingFee(order, input.value);
+    });
+  }
 
   const done = order["出貨狀態"] === "已完成";
   statusBtn.classList.remove("hidden");
@@ -1165,6 +1194,25 @@ function renderOrderDetail() {
 
   deleteBtn.classList.remove("hidden");
   deleteBtn.onclick = () => deleteOrder(order);
+}
+
+async function saveShippingFee(order, rawValue) {
+  const fee = Number(rawValue);
+  if (rawValue === "" || isNaN(fee) || fee < 0) {
+    alert("請輸入有效的運費金額（0 或以上的數字）");
+    return;
+  }
+  const btn = document.getElementById("order-shipping-fee-save");
+  if (btn) { btn.disabled = true; btn.textContent = "儲存中…"; }
+  try {
+    await apiPost({ action: "updateShippingFee", orderId: order["訂單ID"], shippingFee: fee, operator: state.operator });
+    await refreshOrders();
+    renderOrderDetail();
+  } catch (err) {
+    alert("儲存運費失敗：" + err.message);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = "儲存運費"; }
+  }
 }
 
 async function toggleBoxStatus(order, boxIndex) {
